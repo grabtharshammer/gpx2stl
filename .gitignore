@@ -1,5 +1,7 @@
 tile_cache/
 .venv/
+node_modules/
+package-lock.json
 *.stl
 *.png
 __pycache__/

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gpx2stl: GPS track to 3D print</title>
+  <meta name="description" content="Turn a GPX track into a 3D-printable terrain model with your route on it. Runs entirely in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 26 12 9l6 9 4-5 8 13z' fill='%23596b5b'/%3E%3Cpath d='M5 24c4-2 6-6 10-6s5 3 9 1' stroke='%23e8590c' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M2 26 12 9l6 9 4-5 8 13z" class="mtn"/><path d="M5 24c4-2 6-6 10-6s5 3 9 1" class="trk"/></svg>
+      <span class="name">gpx2stl</span>
+      <span class="tag">GPS track &rarr; 3D-printable terrain</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel">
+      <section class="card" id="route-card">
+        <h2>1 &middot; Route</h2>
+        <label class="drop" id="drop">
+          <input type="file" id="file" accept=".gpx,application/gpx+xml" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          <span><strong>Drop a GPX file</strong> or click to browse</span>
+          <small>From Strava, Trailforks, Garmin, Komoot&hellip;</small>
+        </label>
+        <div class="route-info" id="route-info" hidden>
+          <div class="route-name" id="route-name"></div>
+          <div class="route-meta" id="route-meta"></div>
+          <button class="link" id="change-route" type="button">Choose another file</button>
+        </div>
+        <p class="hint" id="example-hint">No file handy? <button class="link" id="example" type="button">Try the Whole Enchilada (Moab)</button></p>
+      </section>
+
+      <section class="card">
+        <h2>2 &middot; Model</h2>
+        <div id="model-controls"></div>
+        <div class="field">
+          <span class="label">Detail</span>
+          <div class="seg" id="detail" role="radiogroup" aria-label="Detail">
+            <button type="button" data-v="0.5">Draft</button>
+            <button type="button" data-v="0.3">Standard</button>
+            <button type="button" data-v="0.2">Fine</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>3 &middot; Trail</h2>
+        <div class="field">
+          <span class="label">Style</span>
+          <div class="seg" id="trail-style" role="radiogroup" aria-label="Trail style">
+            <button type="button" data-v="raised">Raised ridge</button>
+            <button type="button" data-v="groove">Carved groove</button>
+          </div>
+        </div>
+        <div id="trail-controls"></div>
+      </section>
+
+      <details class="card advanced">
+        <summary>Advanced</summary>
+        <div id="advanced-controls"></div>
+        <button class="link" id="reset" type="button">Reset all settings</button>
+      </details>
+
+      <div class="actions">
+        <div class="estimate" id="estimate"></div>
+        <button class="primary" id="generate" type="button" disabled>Generate model</button>
+        <div class="progress" id="progress" hidden>
+          <div class="bar"><span id="progress-bar"></span></div>
+          <div class="progress-label" id="progress-label"></div>
+        </div>
+        <div class="error" id="error" role="alert" hidden></div>
+      </div>
+    </aside>
+
+    <section class="stage">
+      <div class="viewer" id="viewer">
+        <canvas id="canvas"></canvas>
+        <div class="empty" id="empty">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M4 52 24 18l12 18 8-10 16 26z" class="mtn"/><path d="M10 48c8-4 12-12 20-12s10 6 18 2" class="trk"/></svg>
+          <p>Load a GPX route to see your model here.</p>
+        </div>
+        <div class="viewer-tools">
+          <button type="button" id="reset-view" title="Reset view" aria-label="Reset view">
+            <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4"/></svg>
+          </button>
+        </div>
+        <div class="legend"><span class="sw trail"></span>route <span class="hint-drag">&middot; drag to rotate, scroll to zoom</span></div>
+      </div>
+      <div class="result" id="result" hidden>
+        <dl class="stats" id="stats"></dl>
+        <button class="primary download" id="download" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 19h16"/></svg>
+          Download STL <span id="download-size"></span>
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Runs entirely in your browser; your GPX file never leaves your computer.
+    Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a>
+    (SRTM, USGS 3DEP, GMTED and others). Print tip: 0.1&nbsp;mm layers, no supports.
+  </footer>
+</body>
+</html>

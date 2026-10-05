@@ -1,32 +1,61 @@
 # gpx2stl
 
 Turn a GPX track into a 3D-printable terrain relief with the route marked on it.
+Everything runs in the browser: drop in a GPX file, adjust the settings, preview the model in 3D
+and download a watertight STL. Your GPX file never leaves your computer.
 
-## Setup
+## Run it locally
 
-    python -m venv .venv
-    .venv\Scripts\activate          # Windows;  source .venv/bin/activate on macOS/Linux
-    pip install -r requirements.txt
+The app is a static site in `web/` with no build step. Serve it over `http://localhost`
+(opening `index.html` as a file won't work, because browsers block module workers on `file://`):
 
-## Use
+    cd web
+    python -m http.server 8000
 
-    python gpx2stl.py examples/whole_enchilada.gpx -o whole_enchilada.stl --preview preview.png
+Then open <http://localhost:8000>.
 
-Elevation tiles are downloaded on first run and kept in `tile_cache/`, so repeat runs are offline and fast.
+To share it, publish the `web/` folder on any static host (GitHub Pages, Netlify, Cloudflare Pages…).
+It must be served over HTTPS (or localhost) so the elevation tile cache works.
 
-| Option | Default | Meaning |
+## Settings
+
+| Setting | Default | Meaning |
 |---|---|---|
-| `--size` | 180 | Longest side of the model, mm |
-| `--margin-km` | 1.8 | Terrain included around the route |
-| `--z-exag` | 2 | Vertical exaggeration |
-| `--base` | 3 | Thickness under the lowest point, mm |
-| `--cell` | 0.3 | Grid spacing, mm (smaller = more detail, bigger file) |
-| `--trail-height` | 1.0 | Route ridge height, mm; negative cuts a groove |
-| `--trail-width` | 1.6 | Route width, mm |
-| `--corner-radius` | 10 | Footprint corner radius, mm; 0 for square |
-| `--smooth` | 0.8 | Terrain blur, in grid cells |
-| `--zoom` | auto | Elevation tile zoom level |
-| `--cache` | tile_cache | Tile cache folder |
-| `--preview` | off | Write a shaded PNG of the result |
+| Size | 180 mm | Longest side of the model |
+| Vertical exaggeration | 2× | Makes hills taller than real life |
+| Terrain around route | 1.8 km | Margin of terrain included around the track |
+| Detail | Standard (0.3 mm grid) | Draft 0.5 mm, Fine 0.2 mm. Finer = bigger file |
+| Trail style | Raised ridge | Or a carved groove |
+| Trail height/depth, width | 1.0 mm, 1.6 mm | |
+| Base thickness | 3 mm | Under the lowest point |
+| Corner radius | 10 mm | 0 for square corners |
+| Terrain smoothing | 0.8 | Blur in grid cells |
 
-Elevation data: Mapzen/AWS Terrain Tiles (terrarium PNG), about 30 m resolution in the US at zoom 12.
+## Layout
+
+    web/                 the app (static site)
+      js/core/           engine: GPX parsing, PNG/tile decoding, filters, model builder, STL writer
+      js/worker.js       runs the engine in a Web Worker; loads manifold-3d (WASM) from jsDelivr
+      js/app.js          UI and three.js preview
+    tests/               Node regression test + headless-browser smoke test
+    python/              original Python CLI, kept as the reference implementation
+
+## Tests
+
+    cd tests
+    npm install
+    node regression.mjs                    # engine vs. the Python reference numbers
+    npm install --no-save puppeteer-core
+    node browser.mjs /path/to/chromium     # full UI flow in headless Chromium
+
+## Python CLI (reference)
+
+    cd python
+    python -m venv .venv && .venv/bin/pip install -r requirements.txt   # .venv\Scripts\ on Windows
+    python gpx2stl.py ../web/examples/whole_enchilada.gpx -o out.stl --preview out.png
+
+## Credits
+
+Elevation: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (terrarium PNGs; SRTM,
+USGS 3DEP, GMTED and others), about 30 m resolution in the US at zoom 12.
+Geometry: [manifold-3d](https://github.com/elalish/manifold). Preview: [three.js](https://threejs.org).
