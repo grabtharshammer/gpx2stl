@@ -1,0 +1,5 @@
+tile_cache/
+.venv/
+*.stl
+*.png
+__pycache__/
