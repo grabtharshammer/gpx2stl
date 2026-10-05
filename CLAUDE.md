@@ -35,7 +35,7 @@ drives the full UI in headless Chromium (mythpi1 has `/usr/bin/chromium`; this P
 - Map view of the route/footprint (pick or crop the area), start/finish markers, text label.
 - Separate trail body for multi-colour printing (3MF export).
 - Fixed scale/bbox so several routes can share one terrain set; split big models into bed-sized tiles.
-- Deploy to GitHub Pages.
+- (done) Live at https://grabtharshammer.github.io/gpx2stl/, deployed from `web/` by `.github/workflows/pages.yml`.
 
 ## Printing notes (OrcaSlicer)
 0.08–0.12 mm layers, "Ensure vertical shell thickness: All", ~1 mm top shell, 3 walls (Arachne),

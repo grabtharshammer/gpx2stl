@@ -14,7 +14,8 @@ The app is a static site in `web/` with no build step. Serve it over `http://loc
 
 Then open <http://localhost:8000>.
 
-To share it, publish the `web/` folder on any static host (GitHub Pages, Netlify, Cloudflare Pages…).
+Live at **<https://grabtharshammer.github.io/gpx2stl/>**. It is deployed from `web/` by GitHub Actions on every push to `main`
+(`.github/workflows/pages.yml`). Any other static host works too (Netlify, Cloudflare Pages…).
 It must be served over HTTPS (or localhost) so the elevation tile cache works.
 
 ## Settings

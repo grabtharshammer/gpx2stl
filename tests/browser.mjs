@@ -1,5 +1,6 @@
 // Headless browser smoke test: load the page, build the example route, download the STL.
 //   cd tests && npm install --no-save puppeteer-core && node browser.mjs [chromium path] [screenshot dir]
+// Set BASE_URL to test a deployed copy instead of serving ../web locally.
 import http from "node:http";
 import { readFile, mkdtemp, readdir, stat } from "node:fs/promises";
 import { join, extname, dirname } from "node:path";
@@ -20,7 +21,7 @@ const server = http.createServer(async (req, res) => {
   } catch { res.writeHead(404).end(); }
 }).listen(0, "127.0.0.1");
 await new Promise((r) => server.once("listening", r));
-const url = `http://127.0.0.1:${server.address().port}/`;
+const url = process.env.BASE_URL ?? `http://127.0.0.1:${server.address().port}/`;
 
 const browser = await puppeteer.launch({
   executablePath: chrome, headless: true,
