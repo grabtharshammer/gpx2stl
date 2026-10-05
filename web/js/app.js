@@ -1,18 +1,21 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { parseGpx, routeLength } from "./core/gpx.js";
-import { DEFAULTS, planGrid } from "./core/model.js";
+import { DEFAULTS, planGrid, routeFrame } from "./core/model.js";
 import { writeStl } from "./core/stl.js";
+import { FootprintMap } from "./mapview.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "gpx2stl-settings-v1";
 
 // ------------------------------------------------------------------ settings
 const SLIDERS = {
+  "area-controls": [
+    { key: "marginKm", label: "Terrain around route", unit: "km", min: 0.2, max: 10, step: 0.1, resetsArea: true },
+  ],
   "model-controls": [
     { key: "size", label: "Size", unit: "mm", min: 50, max: 300, step: 5, help: "Longest side of the print" },
     { key: "zExag", label: "Vertical exaggeration", unit: "×", min: 1, max: 6, step: 0.1, help: "Makes hills taller than real life" },
-    { key: "marginKm", label: "Terrain around route", unit: "km", min: 0.2, max: 10, step: 0.1 },
   ],
   "trail-controls": [
     { key: "trailDepth", label: "Height", unit: "mm", min: 0.2, max: 3, step: 0.1 },
@@ -25,7 +28,7 @@ const SLIDERS = {
   ],
 };
 const UI_DEFAULTS = {
-  size: DEFAULTS.size, zExag: DEFAULTS.zExag, marginKm: DEFAULTS.marginKm, cell: DEFAULTS.cell,
+  shape: "fit", size: DEFAULTS.size, zExag: DEFAULTS.zExag, marginKm: DEFAULTS.marginKm, cell: DEFAULTS.cell,
   trailStyle: "raised", trailDepth: Math.abs(DEFAULTS.trailHeight), trailWidth: DEFAULTS.trailWidth,
   base: DEFAULTS.base, cornerRadius: DEFAULTS.cornerRadius, smooth: DEFAULTS.smooth,
 };
@@ -38,6 +41,7 @@ const engineOpts = () => ({
   size: settings.size, zExag: settings.zExag, marginKm: settings.marginKm, cell: settings.cell,
   trailHeight: settings.trailStyle === "groove" ? -settings.trailDepth : settings.trailDepth,
   trailWidth: settings.trailWidth, base: settings.base, cornerRadius: settings.cornerRadius, smooth: settings.smooth,
+  area: engineArea(),
 });
 
 const inputs = {};
@@ -57,6 +61,7 @@ for (const [container, defs] of Object.entries(SLIDERS)) {
       if (from !== num) num.value = v;
       if (from !== range) range.value = v;
       settings[d.key] = v;
+      if (d.resetsArea) override = null;
       changed();
     };
     range.addEventListener("input", () => set(range.value, range));
@@ -75,7 +80,14 @@ function bindSeg(id, key, parse = (v) => v) {
   });
   return sync;
 }
-const segSyncs = [bindSeg("detail", "cell", parseFloat), bindSeg("trail-style", "trailStyle")];
+// capture phase: runs before the button's own handler changes settings.shape
+$("shape").addEventListener("click", (e) => {
+  const v = e.target.closest("button")?.dataset.v;
+  if (v && frame) override = v === "custom" ? currentArea() : null;
+}, true);
+// bubble phase: after the new shape is applied, bring the whole box into view
+$("shape").addEventListener("click", () => frame && fpMap.fit());
+const segSyncs = [bindSeg("detail", "cell", parseFloat), bindSeg("trail-style", "trailStyle"), bindSeg("shape", "shape")];
 
 function syncControls() {
   for (const [k, set] of Object.entries(inputs)) set(settings[k]);
@@ -86,12 +98,82 @@ const depthLabel = document.querySelector('label[for="r-trailDepth"]');
 $("trail-style").addEventListener("click", () => syncTrailLabel());
 const syncTrailLabel = () => (depthLabel.textContent = settings.trailStyle === "groove" ? "Depth" : "Height");
 
-$("reset").addEventListener("click", () => { settings = { ...UI_DEFAULTS }; syncControls(); syncTrailLabel(); changed(); });
+$("reset").addEventListener("click", () => { settings = { ...UI_DEFAULTS }; override = null; syncControls(); syncTrailLabel(); changed(); });
 
 // ------------------------------------------------------------------ route loading
 let route = null;      // { name, segments, fileName }
+let frame = null;      // local metre frame of the route (core/model.js routeFrame)
+let override = null;   // print area set on the map, { x0, x1, y0, y1 } metres; null = automatic
 let model = null;      // last built model
 let builtFor = null;   // JSON of the settings + route the model was built with
+
+// ------------------------------------------------------------------ print area
+const RATIOS = { square: 1, "3:2": 1.5 };
+
+/** Locked width/height ratio for the current shape, oriented like the route; null = free. */
+function aspect() {
+  const r = RATIOS[settings.shape], b = frame.bounds;
+  return r ? (b.xmax - b.xmin >= b.ymax - b.ymin ? r : 1 / r) : null;
+}
+
+function currentArea() {
+  if (override) return override;
+  const b = frame.bounds, m = settings.marginKm * 1000;
+  let x0 = b.xmin - m, x1 = b.xmax + m, y0 = b.ymin - m, y1 = b.ymax + m;
+  const a = aspect();
+  if (a) {
+    const w = x1 - x0, h = y1 - y0;
+    if (w / h < a) { const d = (h * a - w) / 2; x0 -= d; x1 += d; }
+    else { const d = (w / a - h) / 2; y0 -= d; y1 += d; }
+  }
+  return { x0, x1, y0, y1 };
+}
+
+/** Area for the engine; undefined keeps its own route + margin box (identical to the Python CLI). */
+function engineArea() {
+  if (!frame || (!override && settings.shape === "fit")) return undefined;
+  const { x0, x1, y0, y1 } = currentArea();
+  const [south, west] = frame.toLL(x0, y0), [north, east] = frame.toLL(x1, y1);
+  return { south, west, north, east };
+}
+
+const fpMap = new FootprintMap($("map"), {
+  onChange(area, final) {
+    override = area;
+    if (settings.shape === "fit") { settings.shape = "custom"; syncControls(); }
+    changed({ fromMap: !final });
+  },
+});
+
+function updateArea(p, fromMap) {
+  const a = currentArea(), b = frame.bounds;
+  if (!fromMap) fpMap.setFootprint(a, settings.cornerRadius / p.sc, aspect());
+  const km = (m) => (m / 1000).toFixed(m < 10000 ? 1 : 0);
+  const cropped = b.xmin < a.x0 || b.xmax > a.x1 || b.ymin < a.y0 || b.ymax > a.y1;
+  $("map-info").innerHTML = `${km(a.x1 - a.x0)} × ${km(a.y1 - a.y0)} km → <b>${p.width.toFixed(0)} × ${p.depth.toFixed(0)} mm</b>` +
+    (cropped ? `<br><span class="warn">Part of the route is outside the print area</span>` : "");
+  $("area-note").innerHTML = override
+    ? `Area adjusted on the map. <button class="link" type="button" id="area-reset">Reset</button>`
+    : "Drag the box on the map to move it, or its corners to resize.";
+  $("area-reset")?.addEventListener("click", () => {
+    override = null;
+    if (settings.shape === "custom") settings.shape = "fit";
+    syncControls();
+    changed();
+    fpMap.fit();
+  });
+}
+
+// ------------------------------------------------------------------ tabs
+function showTab(t) {
+  $("viewer").dataset.tab = t;
+  for (const b of $("tabs").querySelectorAll("button")) b.setAttribute("aria-selected", b.dataset.tab === t);
+  if (t === "map") fpMap.invalidate();
+}
+$("tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (b && !b.disabled) showTab(b.dataset.tab);
+});
 
 async function loadText(text, fileName) {
   try {
@@ -110,8 +192,18 @@ async function loadText(text, fileName) {
   $("example-hint").hidden = true;
   $("route-info").hidden = false;
   showError(null);
+
+  frame = routeFrame(route.segments);
+  override = null;
+  if (settings.shape === "custom") settings.shape = "fit";
+  syncControls();
+  clearModel();
+  $("viewer").classList.add("has-route");
+  $("tabs").hidden = false;
+  showTab("map");
+  fpMap.setRoute(route.segments, frame);
   changed();
-  generate();
+  fpMap.fit();
 }
 
 $("file").addEventListener("change", async (e) => {
@@ -139,16 +231,17 @@ for (const t of [document.body]) {
 const fmtMB = (bytes) => (bytes / 1e6 < 10 ? (bytes / 1e6).toFixed(1) : Math.round(bytes / 1e6)) + " MB";
 const key = () => route && JSON.stringify([route.fileName, route.segments.length, engineOpts()]);
 
-function changed() {
+function changed({ fromMap = false } = {}) {
   save();
   const est = $("estimate"), btn = $("generate");
   if (!route) { est.textContent = ""; btn.disabled = true; return; }
   const p = planGrid(route.segments, engineOpts());
+  updateArea(p, fromMap);
   const bytes = 84 + 50 * p.triangles;
   const tooMany = p.tiles.count > 400;
   est.classList.toggle("warn", tooMany || p.triangles > 4e6);
   est.textContent = tooMany
-    ? `Too much elevation data for this area (${p.tiles.count} tiles). Pick a coarser detail level or less margin.`
+    ? `Too much elevation data for this area (${p.tiles.count} tiles). Pick a coarser detail level or a smaller area.`
     : `≈ ${p.width.toFixed(0)} × ${p.depth.toFixed(0)} mm · 1:${Math.round(1000 / p.sc).toLocaleString()} · ` +
       `${(p.triangles / 1e6).toFixed(p.triangles < 1e6 ? 2 : 1)}M triangles · ${fmtMB(bytes)}` +
       (p.triangles > 4e6 ? " (large: try a coarser detail level)" : "");
@@ -193,6 +286,7 @@ function generate() {
     model = data.model;
     builtFor = k;
     showModel(model);
+    showTab("3d");
     changed();
   };
   worker.onerror = (e) => {
@@ -234,13 +328,14 @@ dark.addEventListener("change", applyTheme);
 
 new ResizeObserver(() => {
   const { clientWidth: w, clientHeight: h } = canvas.parentElement;
+  if (!w || !h) return;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }).observe(canvas.parentElement);
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 
-function frame() {
+function fitCamera() {
   if (!model) return;
   const { width, depth, height } = model.stats, r = Math.hypot(width, depth, height) / 2;
   const vfov = (camera.fov * Math.PI) / 360, hfov = Math.atan(Math.tan(vfov) * camera.aspect);
@@ -251,7 +346,7 @@ function frame() {
   camera.updateProjectionMatrix();
   controls.update();
 }
-$("reset-view").addEventListener("click", frame);
+$("reset-view").addEventListener("click", fitCamera);
 
 function showModel(m, reframe = true) {
   if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
@@ -262,11 +357,12 @@ function showModel(m, reframe = true) {
   const col = new Float32Array(m.trail.length * 3);
   for (let i = 0; i < m.trail.length; i++) (m.trail[i] ? trail : terrain).toArray(col, i * 3);
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  g.translate(-m.stats.width / 2, -m.stats.depth / 2, 0);
   mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
+  mesh.position.set(-m.stats.width / 2, -m.stats.depth / 2, 0);   // don't move the vertices: they're also the STL
   scene.add(mesh);
+  $("tabs").querySelector('[data-tab="3d"]').disabled = false;
   $("viewer").classList.add("has-model");
-  if (reframe) frame();
+  if (reframe) fitCamera();
 
   const s = m.stats;
   const stats = [
@@ -279,6 +375,15 @@ function showModel(m, reframe = true) {
   $("stats").innerHTML = stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
   $("download-size").textContent = `(${fmtMB(84 + 50 * s.triangles)})`;
   $("result").hidden = false;
+}
+
+function clearModel() {
+  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); mesh = null; }
+  model = null;
+  builtFor = null;
+  $("viewer").classList.remove("has-model");
+  $("result").hidden = true;
+  $("tabs").querySelector('[data-tab="3d"]').disabled = true;
 }
 
 $("download").addEventListener("click", () => {

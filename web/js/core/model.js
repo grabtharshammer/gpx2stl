@@ -20,22 +20,44 @@ export const DEFAULTS = {
   zoom: null,         // tile zoom; null = choose from cell size
 };
 
-/** Grid geometry and tile plan for a route; cheap, so the UI can use it for estimates. */
-export function planGrid(segments, opts) {
-  const o = { ...DEFAULTS, ...opts };
+/**
+ * Local equirectangular frame centred on the route: metres east/north of the centre.
+ * x depends only on longitude and y only on latitude, so lat/lon boxes map to rectangles.
+ */
+export function routeFrame(segments) {
   let latc = 0, lonc = 0, n = 0;
   for (const s of segments) for (const [la, lo] of s) { latc += la; lonc += lo; n++; }
   latc /= n; lonc /= n;
   const cosl = Math.cos(latc * RAD);
   const toM = ([la, lo]) => [(lo - lonc) * RAD * EARTH_R * cosl, (la - latc) * RAD * EARTH_R];
-
+  const lonOf = (x) => lonc + x / (EARTH_R * cosl) / RAD;
+  const latOf = (y) => latc + y / EARTH_R / RAD;
   let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
   for (const s of segments) for (const p of s) {
     const [x, y] = toM(p);
     xmin = Math.min(xmin, x); xmax = Math.max(xmax, x); ymin = Math.min(ymin, y); ymax = Math.max(ymax, y);
   }
-  const marg = o.marginKm * 1000;
-  xmin -= marg; xmax += marg; ymin -= marg; ymax += marg;
+  return { latc, lonc, cosl, toM, lonOf, latOf, toLL: (x, y) => [latOf(y), lonOf(x)],
+           bounds: { xmin, xmax, ymin, ymax } };
+}
+
+/**
+ * Grid geometry and tile plan for a route; cheap, so the UI can use it for estimates.
+ * opts.area = { south, west, north, east } prints exactly that box; otherwise the area is the
+ * route's bounding box plus opts.marginKm on every side.
+ */
+export function planGrid(segments, opts) {
+  const o = { ...DEFAULTS, ...opts };
+  const frame = routeFrame(segments);
+  const { latc, lonc, cosl, toM, lonOf, latOf } = frame;
+  let { xmin, xmax, ymin, ymax } = frame.bounds;
+  if (o.area) {
+    [xmin, ymin] = toM([o.area.south, o.area.west]);
+    [xmax, ymax] = toM([o.area.north, o.area.east]);
+  } else {
+    const marg = o.marginKm * 1000;
+    xmin -= marg; xmax += marg; ymin -= marg; ymax += marg;
+  }
   const sc = o.size / Math.max(xmax - xmin, ymax - ymin);      // mm per metre
   const nx = Math.round(((xmax - xmin) * sc) / o.cell) + 1;
   const ny = Math.round(((ymax - ymin) * sc) / o.cell) + 1;
@@ -45,15 +67,13 @@ export function planGrid(segments, opts) {
     z = 8;
     while (z < 14 && (156543.03 * cosl) / 2 ** z > o.cell / sc) z++;
   }
-  const lonOf = (x) => lonc + x / (EARTH_R * cosl) / RAD;
-  const latOf = (y) => latc + y / EARTH_R / RAD;
   const [xa, ya] = lonLatToTile(lonOf(xmin), latOf(ymax), z);   // north-west
   const [xb, yb] = lonLatToTile(lonOf(xmax), latOf(ymin), z);   // south-east
   const tiles = { x0: Math.floor(xa), x1: Math.floor(xb), y0: Math.floor(ya), y1: Math.floor(yb) };
   tiles.count = (tiles.x1 - tiles.x0 + 1) * (tiles.y1 - tiles.y0 + 1);
 
   return {
-    o, latc, lonc, cosl, toM, lonOf, latOf, xmin, xmax, ymin, ymax, sc, nx, ny, z, tiles,
+    o, frame, latc, lonc, cosl, toM, lonOf, latOf, xmin, xmax, ymin, ymax, sc, nx, ny, z, tiles,
     width: (nx - 1) * o.cell, depth: (ny - 1) * o.cell,
     triangles: 2 * (nx - 1) * (ny - 1) + 3 * 2 * (nx + ny - 2),   // before corner rounding
   };
@@ -130,7 +150,7 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         const f = t / len;
         const ix = Math.round(((ax + (bx - ax) * f - xmin) * sc) / cell);
         const iy = Math.round(((ay + (by - ay) * f - ymin) * sc) / cell);
-        seed[clip(iy, ny - 1) * nx + clip(ix, nx - 1)] = 1;
+        if (ix >= 0 && ix < nx && iy >= 0 && iy < ny) seed[iy * nx + ix] = 1;   // area may crop the route
       }
       t -= len;
     }

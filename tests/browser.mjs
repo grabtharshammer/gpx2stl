@@ -43,18 +43,49 @@ async function run(name, { width, height, dark }) {
 
   await page.goto(url, { waitUntil: "networkidle0" });
   await page.screenshot({ path: join(shots, `${name}-empty.png`) });
-  const t0 = Date.now();
-  await page.click("#example");
-  await page.waitForFunction(() => !document.getElementById("result").hidden || !document.getElementById("error").hidden,
-                             { timeout: 180000 });
-  const err = await page.$eval("#error", (e) => (e.hidden ? null : e.textContent));
-  if (err) return fail(`${name} build error: ${err}`);
-  const stats = await page.$eval("#stats", (e) => e.innerText.replace(/\n/g, " "));
-  console.log(`${name}: built in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${stats}`);
-  await new Promise((r) => setTimeout(r, 1500));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const click = async (sel) => {
+    await page.$eval(sel, (b) => b.scrollIntoView({ block: "center" }));
+    await page.click(sel);
+  };
+  const build = async (what) => {
+    const t0 = Date.now();
+    await click("#generate");
+    await page.waitForFunction(() => document.getElementById("generate").textContent === "Model is up to date" ||
+                                     !document.getElementById("error").hidden, { timeout: 180000 });
+    const err = await page.$eval("#error", (e) => (e.hidden ? null : e.textContent));
+    if (err) throw new Error(`${name} build error (${what}): ${err}`);
+    const stats = await page.$eval("#stats", (e) => e.innerText.replace(/\n/g, " "));
+    console.log(`${name}: ${what} built in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${stats}`);
+    await sleep(1500);
+    return stats;
+  };
+  // drag a map handle by (dx, dy) pixels
+  const drag = async (sel, dx, dy) => {
+    await page.$eval("#viewer", (v) => v.scrollIntoView({ block: "center" }));
+    const b = await (await page.$(sel)).boundingBox();
+    const x = b.x + b.width / 2, y = b.y + b.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i++) await page.mouse.move(x + (dx * i) / 10, y + (dy * i) / 10);
+    await page.mouse.up();
+  };
+  const info = () => page.$eval("#map-info", (e) => e.innerText.replace(/\n/g, " "));
+
+  // load -> map tab with route + footprint
+  await click("#example");
+  await page.waitForSelector(".fp-c");
+  await sleep(2500);   // map tiles
+  if ((await page.$eval("#viewer", (v) => v.dataset.tab)) !== "map") fail(`${name}: map tab not shown after load`);
+  console.log(`${name}: map shows ${await info()}`);
+  await page.screenshot({ path: join(shots, `${name}-map.png`) });
+
+  // default build -> 3D tab, matches the reference
+  await build("default");
+  if ((await page.$eval("#viewer", (v) => v.dataset.tab)) !== "3d") fail(`${name}: 3D tab not shown after build`);
   await page.screenshot({ path: join(shots, `${name}-model.png`), fullPage: true });
 
-  await page.click("#download");
+  await click("#download");
   for (let i = 0; i < 50; i++) {
     const files = (await readdir(dl)).filter((f) => f.endsWith(".stl"));
     if (files.length) {
@@ -64,20 +95,41 @@ async function run(name, { width, height, dark }) {
       break;
     }
     if (i === 49) fail(`${name}: no download`);
-    await new Promise((r) => setTimeout(r, 200));
+    await sleep(200);
   }
 
   // change a setting -> rebuild via "Update model"
-  const groove = '#trail-style [data-v="groove"]';
-  await page.$eval(groove, (b) => b.scrollIntoView({ block: "center" }));
-  await page.click(groove);
+  await click('#trail-style [data-v="groove"]');
   const label = await page.$eval("#generate", (b) => b.textContent);
   if (label !== "Update model") fail(`${name}: button says "${label}" after a settings change`);
-  await page.click("#generate");
-  await page.waitForFunction(() => document.getElementById("generate").textContent === "Model is up to date",
-                             { timeout: 180000 });
-  await new Promise((r) => setTimeout(r, 1500));
+  await build("groove");
   await page.screenshot({ path: join(shots, `${name}-groove.png`) });
+
+  // square shape, then move and crop the box on the map
+  await click('#tabs [data-tab="map"]');
+  await click('#shape [data-v="square"]');
+  const sq = await info();
+  if (!/→ 180 × 180 mm/.test(sq)) fail(`${name}: square shape gave "${sq}"`);
+  await drag(".fp-c", 40, 30);
+  if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "square") fail(`${name}: moving changed the shape`);
+  const moved = await info();
+  await drag(".fp-ne", -120, 60);
+  const cropped = await info();
+  if (cropped === moved) fail(`${name}: resizing the box didn't change the area`);
+  console.log(`${name}: after move + resize: ${cropped}`);
+  if (!/→ 180 × 180 mm/.test(cropped)) fail(`${name}: square aspect not kept when resizing`);
+  if (!(await page.$("#area-reset"))) fail(`${name}: no Reset link after editing the area`);
+  await page.screenshot({ path: join(shots, `${name}-map-edited.png`) });
+  await build("square, edited area");
+  await page.screenshot({ path: join(shots, `${name}-model-edited.png`) });
+
+  // free resize in Fit mode switches to Custom
+  await click('#tabs [data-tab="map"]');
+  await click('#shape [data-v="fit"]');
+  await drag(".fp-sw", 50, -20);
+  if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "custom") fail(`${name}: resizing in Fit mode didn't switch to Custom`);
+  await click("#area-reset");
+  if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "fit") fail(`${name}: Reset didn't return to Fit`);
   await ctx.close();
 }
 

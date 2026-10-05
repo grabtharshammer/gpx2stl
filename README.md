@@ -1,8 +1,9 @@
 # gpx2stl
 
 Turn a GPX track into a 3D-printable terrain relief with the route marked on it.
-Everything runs in the browser: drop in a GPX file, adjust the settings, preview the model in 3D
-and download a watertight STL. Your GPX file never leaves your computer.
+Everything runs in the browser: drop in a GPX file, choose the print area on a topo map, adjust
+the settings, preview the model in 3D and download a watertight STL. Your GPX file never leaves
+your computer.
 
 ## Run it locally
 
@@ -22,9 +23,10 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 
 | Setting | Default | Meaning |
 |---|---|---|
+| Shape | Fit route | Fit route, Square, 3:2, or Custom. Drag the box on the map to move it, drag its corners to resize (Square and 3:2 keep their proportions) |
 | Size | 180 mm | Longest side of the model |
 | Vertical exaggeration | 2× | Makes hills taller than real life |
-| Terrain around route | 1.8 km | Margin of terrain included around the track |
+| Terrain around route | 1.8 km | Margin around the track; resets any area edited on the map |
 | Detail | Standard (0.3 mm grid) | Draft 0.5 mm, Fine 0.2 mm. Finer = bigger file |
 | Trail style | Raised ridge | Or a carved groove |
 | Trail height/depth, width | 1.0 mm, 1.6 mm | |
@@ -37,7 +39,8 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
     web/                 the app (static site)
       js/core/           engine: GPX parsing, PNG/tile decoding, filters, model builder, STL writer
       js/worker.js       runs the engine in a Web Worker; loads manifold-3d (WASM) from jsDelivr
-      js/app.js          UI and three.js preview
+      js/app.js          UI, print-area state and three.js preview
+      js/mapview.js      Leaflet map: route + draggable/resizable print footprint
     tests/               Node regression test + headless-browser smoke test
     python/              original Python CLI, kept as the reference implementation
 
@@ -59,4 +62,5 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 
 Elevation: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (terrarium PNGs; SRTM,
 USGS 3DEP, GMTED and others), about 30 m resolution in the US at zoom 12.
+Map: [OpenTopoMap](https://opentopomap.org) (© OpenStreetMap contributors, SRTM) via [Leaflet](https://leafletjs.com).
 Geometry: [manifold-3d](https://github.com/elalish/manifold). Preview: [three.js](https://threejs.org).

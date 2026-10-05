@@ -19,6 +19,18 @@ as the reference implementation.
 4. `filters.js` reproduces scipy `gaussian_filter` (truncate 4, reflect) and `distance_transform_edt`.
 5. `stl.js` — binary STL writer.
 
+## Print area (web/js/app.js + mapview.js)
+- `routeFrame` (core/model.js) is the local metre frame; the UI keeps areas as {x0,x1,y0,y1} metres
+  in it and passes `opts.area = {south, west, north, east}` to the engine. Because x depends only on
+  lon and y only on lat, that box maps exactly to a rectangle.
+- Shape "fit" with no map edit passes NO area, so the engine uses route + margin exactly like the
+  Python CLI (this is what keeps the regression identical). Square / 3:2 expand the fit box to that
+  ratio (landscape/portrait follows the route). Dragging in Fit switches to Custom; Square / 3:2 keep
+  their ratio while resizing. Margin changes and shape clicks discard map edits.
+- Route points outside the area are skipped when rasterising (not clamped, which would draw a fake
+  ridge along the edge).
+- Map: Leaflet 1.9.4 ESM + OpenTopoMap tiles (needs attribution; fine for hobby traffic).
+
 ## Reference output / regression
 Defaults on `web/examples/whole_enchilada.gpx`: 180.0 x 111.9 x 32.2 mm, 1:173,067, elevation
 1208–3733 m, zoom 12, 452,004 triangles, 255 cm3. The JS engine matches the Python output exactly
@@ -32,7 +44,7 @@ drives the full UI in headless Chromium (mythpi1 has `/usr/bin/chromium`; this P
 - Max 400 tiles per model.
 
 ## Ideas
-- Map view of the route/footprint (pick or crop the area), start/finish markers, text label.
+- (done) Map view with movable/resizable print area. Next: start/finish markers, text label.
 - Separate trail body for multi-colour printing (3MF export).
 - Fixed scale/bbox so several routes can share one terrain set; split big models into bed-sized tiles.
 - (done) Live at https://grabtharshammer.github.io/gpx2stl/, deployed from `web/` by `.github/workflows/pages.yml`.

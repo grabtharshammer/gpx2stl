@@ -6,12 +6,14 @@
   <title>gpx2stl: GPS track to 3D print</title>
   <meta name="description" content="Turn a GPX track into a 3D-printable terrain model with your route on it. Runs entirely in your browser.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 26 12 9l6 9 4-5 8 13z' fill='%23596b5b'/%3E%3Cpath d='M5 24c4-2 6-6 10-6s5 3 9 1' stroke='%23e8590c' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="css/style.css">
   <script type="importmap">
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+        "leaflet": "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet-src.esm.js"
       }
     }
   </script>
@@ -45,7 +47,22 @@
       </section>
 
       <section class="card">
-        <h2>2 &middot; Model</h2>
+        <h2>2 &middot; Print area</h2>
+        <div class="field">
+          <span class="label">Shape</span>
+          <div class="seg" id="shape" role="radiogroup" aria-label="Shape">
+            <button type="button" data-v="fit" title="Route plus the margin below">Fit route</button>
+            <button type="button" data-v="square">Square</button>
+            <button type="button" data-v="3:2">3 : 2</button>
+            <button type="button" data-v="custom">Custom</button>
+          </div>
+        </div>
+        <div id="area-controls"></div>
+        <p class="area-note" id="area-note">Drag the box on the map to move it, or its corners to resize.</p>
+      </section>
+
+      <section class="card">
+        <h2>3 &middot; Model</h2>
         <div id="model-controls"></div>
         <div class="field">
           <span class="label">Detail</span>
@@ -58,7 +75,7 @@
       </section>
 
       <section class="card">
-        <h2>3 &middot; Trail</h2>
+        <h2>4 &middot; Trail</h2>
         <div class="field">
           <span class="label">Style</span>
           <div class="seg" id="trail-style" role="radiogroup" aria-label="Trail style">
@@ -87,11 +104,17 @@
     </aside>
 
     <section class="stage">
-      <div class="viewer" id="viewer">
-        <canvas id="canvas"></canvas>
+      <div class="viewer" id="viewer" data-tab="map">
+        <div class="tabs" role="tablist" id="tabs" hidden>
+          <button type="button" role="tab" data-tab="map">Map</button>
+          <button type="button" role="tab" data-tab="3d">3D model</button>
+        </div>
+        <div id="map" class="pane pane-map"></div>
+        <div class="map-info" id="map-info"></div>
+        <canvas id="canvas" class="pane pane-3d"></canvas>
         <div class="empty" id="empty">
           <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M4 52 24 18l12 18 8-10 16 26z" class="mtn"/><path d="M10 48c8-4 12-12 20-12s10 6 18 2" class="trk"/></svg>
-          <p>Load a GPX route to see your model here.</p>
+          <p>Load a GPX route to get started.</p>
         </div>
         <div class="viewer-tools">
           <button type="button" id="reset-view" title="Reset view" aria-label="Reset view">
