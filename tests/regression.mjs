@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 import Module from "manifold-3d";
 import { parseGpx } from "../web/js/core/gpx.js";
 import { tileUrl, decodeTerrarium } from "../web/js/core/tiles.js";
-import { buildModel } from "../web/js/core/model.js";
+import { buildModel, routeFrame } from "../web/js/core/model.js";
+import { outline, fitHexagon } from "../web/js/core/footprint.js";
 import { writeStl } from "../web/js/core/stl.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,4 +53,34 @@ let bad = 0;
 for (const [k, got, want, tol] of expect)
   if (Math.abs(got - want) > tol) { bad++; console.log(`MISMATCH ${k}: got ${got}, want ${want} ±${tol}`); }
 console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
+
+// Hexagon footprint: fitted the way the UI does it; every vertex must lie inside the hexagon
+// and the outline must reach the box edges (i.e. it really is the hexagon, not the box).
+{
+  const f = routeFrame(gpx.segments), b = f.bounds;
+  const pts = gpx.segments.flat().map(f.toM);
+  const h = fitHexagon(pts, (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, 1800);
+  const [south, west] = f.toLL(h.x0, h.y0), [north, east] = f.toLL(h.x1, h.y1);
+  const hm = await buildModel(gpx.segments, { shape: "hex", area: { south, west, north, east }, cornerRadius: 0 },
+                              { getTile, manifold: wasm });
+  const hs = hm.stats, poly = outline("hex", hs.width, hs.depth), p = hm.positions;
+  // signed distance (mm) inside the polygon's nearest edge; float32 vertices sit ~1e-5 off the edges
+  const depthInside = (x, y) => Math.min(...poly.map(([ax, ay], i) => {
+    const [bx, by] = poly[(i + 1) % poly.length], l = Math.hypot(bx - ax, by - ay);
+    return ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / l;
+  }));
+  let outside = 0, xmax = 0;
+  for (let i = 0; i < p.length; i += 3) {
+    if (depthInside(p[i], p[i + 1]) < -0.001) outside++;
+    xmax = Math.max(xmax, p[i]);
+  }
+  const ratio = hs.width / hs.depth;
+  console.log(`hexagon (${h.flat ? "flat" : "pointy"} top): ${hs.width.toFixed(1)} x ${hs.depth.toFixed(1)} mm, ` +
+              `${hs.triangles.toLocaleString("en")} triangles, ${hs.volume.toFixed(0)} cm3, ${outside} vertices outside`);
+  const want = h.flat ? 2 / Math.sqrt(3) : Math.sqrt(3) / 2;
+  if (Math.abs(ratio - want) > 0.01) { bad++; console.log(`MISMATCH hexagon aspect ${ratio}, want ${want}`); }
+  if (outside) { bad++; console.log("MISMATCH vertices outside the hexagon"); }
+  if (Math.abs(xmax - hs.width) > 0.05) { bad++; console.log("MISMATCH hexagon does not reach the box edge"); }
+  console.log(bad ? "FAILED" : "OK: hexagon");
+}
 process.exit(bad ? 1 : 0);

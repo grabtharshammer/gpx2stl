@@ -2,6 +2,7 @@
 // Port of the original Python gpx2stl.build(); keep the two in step (see tests/).
 import { TILE, lonLatToTile } from "./tiles.js";
 import { gaussianBlur, distanceTransform } from "./filters.js";
+import { outline } from "./footprint.js";
 
 const EARTH_R = 6371008.8;
 const MAX_TILES = 400;
@@ -16,6 +17,7 @@ export const DEFAULTS = {
   trailHeight: 1.0,   // mm; negative cuts a groove
   trailWidth: 1.6,    // mm
   cornerRadius: 10,   // mm; 0 for square
+  shape: "rect",      // footprint: "rect" or "hex" (hexagon inscribed in the area)
   smooth: 0.8,        // terrain blur, grid cells
   zoom: null,         // tile zoom; null = choose from cell size
 };
@@ -75,7 +77,8 @@ export function planGrid(segments, opts) {
   return {
     o, frame, latc, lonc, cosl, toM, lonOf, latOf, xmin, xmax, ymin, ymax, sc, nx, ny, z, tiles,
     width: (nx - 1) * o.cell, depth: (ny - 1) * o.cell,
-    triangles: 2 * (nx - 1) * (ny - 1) + 3 * 2 * (nx + ny - 2),   // before corner rounding
+    // before cutting the footprint; a hexagon keeps about 3/4 of its box
+    triangles: Math.round((o.shape === "hex" ? 0.75 : 1) * 2 * (nx - 1) * (ny - 1)) + 3 * 2 * (nx + ny - 2),
   };
 }
 
@@ -200,7 +203,11 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   try {
     let solid = keep(new Manifold(new Mesh({ numProp: 3, vertProperties: V, triVerts: F })));
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
-    if (r > 0) {
+    if (o.shape === "hex") {
+      let cs = keep(new CrossSection([outline("hex", W, D)]));
+      if (r > 0) cs = keep(keep(cs.offset(-r, "Miter")).offset(r, "Round", 2, 96));
+      solid = keep(solid.intersect(keep(Manifold.extrude(cs, zmax + 10))));
+    } else if (r > 0) {
       const sq = keep(keep(CrossSection.square([W - 2 * r, D - 2 * r])).translate([r, r]));
       const cs = keep(sq.offset(r, "Round", 2, 96));
       solid = keep(solid.intersect(keep(Manifold.extrude(cs, zmax + 10))));

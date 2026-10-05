@@ -4,6 +4,7 @@ import { parseGpx, routeLength } from "./core/gpx.js";
 import { DEFAULTS, planGrid, routeFrame } from "./core/model.js";
 import { writeStl } from "./core/stl.js";
 import { FootprintMap } from "./mapview.js";
+import { outline, roundedOutline, insidePolygon, fitHexagon } from "./core/footprint.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "gpx2stl-settings-v1";
@@ -42,6 +43,7 @@ const engineOpts = () => ({
   trailHeight: settings.trailStyle === "groove" ? -settings.trailDepth : settings.trailDepth,
   trailWidth: settings.trailWidth, base: settings.base, cornerRadius: settings.cornerRadius, smooth: settings.smooth,
   area: engineArea(),
+  shape: footprintShape(),
 });
 
 const inputs = {};
@@ -103,21 +105,33 @@ $("reset").addEventListener("click", () => { settings = { ...UI_DEFAULTS }; over
 // ------------------------------------------------------------------ route loading
 let route = null;      // { name, segments, fileName }
 let frame = null;      // local metre frame of the route (core/model.js routeFrame)
+let routePts = [];     // route points in that frame, metres
 let override = null;   // print area set on the map, { x0, x1, y0, y1 } metres; null = automatic
 let model = null;      // last built model
 let builtFor = null;   // JSON of the settings + route the model was built with
 
 // ------------------------------------------------------------------ print area
 const RATIOS = { square: 1, "3:2": 1.5 };
+const footprintShape = () => (settings.shape === "hex" ? "hex" : "rect");
+
+function autoHexagon() {
+  const b = frame.bounds;
+  return fitHexagon(routePts, (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, settings.marginKm * 1000);
+}
 
 /** Locked width/height ratio for the current shape, oriented like the route; null = free. */
 function aspect() {
+  if (settings.shape === "hex") return autoHexagon().flat ? 2 / Math.sqrt(3) : Math.sqrt(3) / 2;
   const r = RATIOS[settings.shape], b = frame.bounds;
   return r ? (b.xmax - b.xmin >= b.ymax - b.ymin ? r : 1 / r) : null;
 }
 
 function currentArea() {
   if (override) return override;
+  if (settings.shape === "hex") {
+    const { x0, x1, y0, y1 } = autoHexagon();
+    return { x0, x1, y0, y1 };
+  }
   const b = frame.bounds, m = settings.marginKm * 1000;
   let x0 = b.xmin - m, x1 = b.xmax + m, y0 = b.ymin - m, y1 = b.ymax + m;
   const a = aspect();
@@ -146,10 +160,12 @@ const fpMap = new FootprintMap($("map"), {
 });
 
 function updateArea(p, fromMap) {
-  const a = currentArea(), b = frame.bounds;
-  if (!fromMap) fpMap.setFootprint(a, settings.cornerRadius / p.sc, aspect());
+  const a = currentArea();
+  const cornerM = settings.cornerRadius / p.sc;
+  if (!fromMap) fpMap.setFootprint(a, cornerM, aspect(), footprintShape());
   const km = (m) => (m / 1000).toFixed(m < 10000 ? 1 : 0);
-  const cropped = b.xmin < a.x0 || b.xmax > a.x1 || b.ymin < a.y0 || b.ymax > a.y1;
+  const poly = roundedOutline(outline(footprintShape(), a.x1 - a.x0, a.y1 - a.y0), cornerM);
+  const cropped = routePts.some(([x, y]) => !insidePolygon(poly, x - a.x0, y - a.y0));
   $("map-info").innerHTML = `${km(a.x1 - a.x0)} × ${km(a.y1 - a.y0)} km → <b>${p.width.toFixed(0)} × ${p.depth.toFixed(0)} mm</b>` +
     (cropped ? `<br><span class="warn">Part of the route is outside the print area</span>` : "");
   $("area-note").innerHTML = override
@@ -194,6 +210,7 @@ async function loadText(text, fileName) {
   showError(null);
 
   frame = routeFrame(route.segments);
+  routePts = route.segments.flat().map(frame.toM);
   override = null;
   if (settings.shape === "custom") settings.shape = "fit";
   syncControls();

@@ -23,7 +23,7 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Shape | Fit route | Fit route, Square, 3:2, or Custom. Drag the box on the map to move it, drag its corners to resize (Square and 3:2 keep their proportions) |
+| Shape | Fit route | Fit route, Square, 3:2, Hexagon, or Custom. Drag the shape on the map to move it, drag its corners to resize (Square, 3:2 and Hexagon keep their proportions). Hexagon fits itself tightly around the route and picks flat- or pointy-top, whichever is smaller |
 | Size | 180 mm | Longest side of the model |
 | Vertical exaggeration | 2× | Makes hills taller than real life |
 | Terrain around route | 1.8 km | Margin around the track; resets any area edited on the map |
@@ -37,7 +37,7 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 ## Layout
 
     web/                 the app (static site)
-      js/core/           engine: GPX parsing, PNG/tile decoding, filters, model builder, STL writer
+      js/core/           engine: GPX parsing, PNG/tile decoding, filters, footprint shapes, model builder, STL writer
       js/worker.js       runs the engine in a Web Worker; loads manifold-3d (WASM) from jsDelivr
       js/app.js          UI, print-area state and three.js preview
       js/mapview.js      Leaflet map: route + draggable/resizable print footprint

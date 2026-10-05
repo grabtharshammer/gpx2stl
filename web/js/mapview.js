@@ -1,8 +1,18 @@
 // Map tab: the route on a topo map plus the print footprint, which can be moved and resized.
 // Areas are { x0, x1, y0, y1 } in the route's local metre frame (see core/model.js routeFrame).
 import * as L from "leaflet";
+import { outline, roundedOutline } from "./core/footprint.js";
 
 const MIN_SIDE = 200;   // metres
+const OPPOSITE = { sw: "ne", se: "nw", ne: "sw", nw: "se" };
+
+/** Where each resize handle sits, as fractions of the area's box: on the shape's own corners. */
+function handleFractions(shape, w, h) {
+  if (shape === "hex")
+    return w >= h ? { sw: [0.25, 0], se: [0.75, 0], ne: [0.75, 1], nw: [0.25, 1] }      // flat top
+                  : { sw: [0, 0.25], se: [1, 0.25], ne: [1, 0.75], nw: [0, 0.75] };     // pointy top
+  return { sw: [0, 0], se: [1, 0], ne: [1, 1], nw: [0, 1] };
+}
 
 export class FootprintMap {
   constructor(el, { onChange }) {
@@ -41,11 +51,15 @@ export class FootprintMap {
     for (const h of Object.values(this.handles)) h.setOpacity(1);
   }
 
-  /** area: local metres; cornerM: corner radius in metres; aspect: locked w/h ratio or null. */
-  setFootprint(area, cornerM, aspect, fit = false) {
+  /**
+   * area: local metres; cornerM: corner radius in metres; aspect: locked w/h ratio or null;
+   * shape: "rect" or "hex" (see core/footprint.js outline).
+   */
+  setFootprint(area, cornerM, aspect, shape = "rect", fit = false) {
     this.area = { ...area };
     this.cornerM = cornerM;
     this.aspect = aspect;
+    this.shape = shape;
     this.#draw();
     if (fit) this.fit();
   }
@@ -60,18 +74,11 @@ export class FootprintMap {
 
   #draw() {
     const { x0, x1, y0, y1 } = this.area, f = this.frame;
-    const r = Math.max(0, Math.min(this.cornerM, (x1 - x0) / 2, (y1 - y0) / 2));
-    const pts = [];
-    const arc = (cx, cy, a0) => {
-      for (let i = 0; i <= 8; i++) {
-        const a = ((a0 + (i * 90) / 8) * Math.PI) / 180;
-        pts.push(f.toLL(cx + r * Math.cos(a), cy + r * Math.sin(a)));
-      }
-    };
-    arc(x1 - r, y0 + r, 270); arc(x1 - r, y1 - r, 0); arc(x0 + r, y1 - r, 90); arc(x0 + r, y0 + r, 180);
-    this.box.setLatLngs(pts);
-    const at = { sw: [x0, y0], se: [x1, y0], ne: [x1, y1], nw: [x0, y1], c: [(x0 + x1) / 2, (y0 + y1) / 2] };
-    for (const [k, [x, y]] of Object.entries(at)) this.handles[k].setLatLng(f.toLL(x, y));
+    const poly = roundedOutline(outline(this.shape, x1 - x0, y1 - y0), this.cornerM);
+    this.box.setLatLngs(poly.map(([x, y]) => f.toLL(x0 + x, y0 + y)));
+    const fr = handleFractions(this.shape, x1 - x0, y1 - y0);
+    for (const [k, [u, v]] of Object.entries(fr)) this.handles[k].setLatLng(f.toLL(x0 + u * (x1 - x0), y0 + v * (y1 - y0)));
+    this.handles.c.setLatLng(f.toLL((x0 + x1) / 2, (y0 + y1) / 2));
   }
 
   #drag(k, ll, final) {
@@ -81,16 +88,17 @@ export class FootprintMap {
       const dx = x - (x0 + x1) / 2, dy = y - (y0 + y1) / 2;
       x0 += dx; x1 += dx; y0 += dy; y1 += dy;
     } else {
-      // the opposite corner stays put
-      const fx = k.includes("w") ? x1 : x0, fy = k.includes("s") ? y1 : y0;
-      let w = Math.max(Math.abs(x - fx), MIN_SIDE), h = Math.max(Math.abs(y - fy), MIN_SIDE);
+      // the opposite handle stays put; handles sit at fractions (u, v) of the box
+      const fr = handleFractions(this.shape, x1 - x0, y1 - y0), [u, v] = fr[k], [ou, ov] = fr[OPPOSITE[k]];
+      const fx = x0 + ou * (x1 - x0), fy = y0 + ov * (y1 - y0);
+      let w = Math.max(Math.abs(x - fx) / Math.abs(u - ou), MIN_SIDE);
+      let h = Math.max(Math.abs(y - fy) / Math.abs(v - ov), MIN_SIDE);
       if (this.aspect) {
         if (w / h > this.aspect) h = w / this.aspect;
         else w = h * this.aspect;
       }
-      const sx = k.includes("w") ? -1 : 1, sy = k.includes("s") ? -1 : 1;
-      [x0, x1] = sx < 0 ? [fx - w, fx] : [fx, fx + w];
-      [y0, y1] = sy < 0 ? [fy - h, fy] : [fy, fy + h];
+      x0 = fx - ou * w; x1 = x0 + w;
+      y0 = fy - ov * h; y1 = y0 + h;
     }
     this.area = { x0, x1, y0, y1 };
     this.#draw();

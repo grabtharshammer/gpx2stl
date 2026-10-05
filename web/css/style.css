@@ -155,3 +155,5 @@ path.fp-end { stroke: #fff; stroke-width: 2; fill: #c92a2a; fill-opacity: 1; }
   .map-info { bottom: auto; top: 52px; left: 50%; transform: translateX(-50%); white-space: nowrap; }
   .leaflet-control-zoom { display: none; }
 }
+#shape { display: flex; }
+#shape button { flex: 1 1 auto; font-size: 13.5px; }

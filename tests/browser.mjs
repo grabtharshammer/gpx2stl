@@ -123,6 +123,23 @@ async function run(name, { width, height, dark }) {
   await build("square, edited area");
   await page.screenshot({ path: join(shots, `${name}-model-edited.png`) });
 
+  // hexagon: regular (w/h = 2/√3 or √3/2), cut as a hexagon
+  await click('#tabs [data-tab="map"]');
+  await click('#shape [data-v="hex"]');
+  const hx = await info(), [, hw, hh] = /→ (\d+) × (\d+) mm/.exec(hx) ?? [];
+  const ratio = hw / hh;
+  if (!(Math.abs(ratio - 2 / Math.sqrt(3)) < 0.02 || Math.abs(ratio - Math.sqrt(3) / 2) < 0.02)) fail(`${name}: hexagon gave "${hx}"`);
+  if (/outside/.test(hx)) fail(`${name}: auto-fitted hexagon crops the route`);
+  await page.screenshot({ path: join(shots, `${name}-map-hex.png`) });
+  await build("hexagon");
+  await click('#tabs [data-tab="map"]');
+  await drag(".fp-ne", -40, 30);
+  const hx2 = await info(), [, w2, h2] = /→ (\d+) × (\d+) mm/.exec(hx2) ?? [];
+  if (hx2 === hx || Math.abs(w2 / h2 - ratio) > 0.02) fail(`${name}: hexagon resize gave "${hx2}" (was "${hx}")`);
+  if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "hex") fail(`${name}: resizing changed the hexagon shape`);
+  console.log(`${name}: hexagon resized: ${hx2}`);
+  await page.screenshot({ path: join(shots, `${name}-model-hex.png`) });
+
   // free resize in Fit mode switches to Custom
   await click('#tabs [data-tab="map"]');
   await click('#shape [data-v="fit"]');
