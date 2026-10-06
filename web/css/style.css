@@ -194,3 +194,4 @@ path.fp-route-full { stroke: #e8590c; stroke-opacity: .35; stroke-dasharray: 2 6
 .downloads .link { font-size: 14px; }
 #inlay-body { margin-top: 12px; }
 #inlay-controls { margin-top: 12px; }
+.warn-note { color: var(--danger); }

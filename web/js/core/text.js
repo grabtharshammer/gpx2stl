@@ -2,26 +2,30 @@
 
 /**
  * Lay out `text` (may contain newlines), centred on the origin, y up.
- * letterHeight is the capital height in mm. Returns
+ * letterHeight is the capital height in mm; titleHeight (optional) sets it for the first line.
+ * Returns
  *   { contours: [[[x, y], ...], ...], width, height }   (contours use the non-zero fill rule)
  * or null if there's nothing to print.
  */
-export function layoutText(font, text, letterHeight, { lineSpacing = 1.5, align = "center" } = {}) {
+export function layoutText(font, text, letterHeight, { titleHeight = letterHeight, lineSpacing = 1.5, align = "center" } = {}) {
   const lines = text.replace(/\r/g, "").split("\n").map((l) => l.replace(/\s+$/, ""));
   while (lines.length && !lines.at(-1)) lines.pop();
   if (!lines.some((l) => l.trim())) return null;
 
   const cap = font.tables.os2?.sCapHeight || font.unitsPerEm * 0.7;
-  const size = (letterHeight * font.unitsPerEm) / cap;           // font size in mm
-  const step = Math.max(0.05, letterHeight / 25);                 // curve flattening, mm
-  const widths = lines.map((l) => font.getAdvanceWidth(l, size));
+  const heights = lines.map((_, i) => (i ? letterHeight : titleHeight));
+  const sizes = heights.map((h) => (h * font.unitsPerEm) / cap);   // font sizes in mm
+  const step = Math.max(0.05, Math.min(...heights) / 25);         // curve flattening, mm
+  const widths = lines.map((l, i) => font.getAdvanceWidth(l, sizes[i]));
   const maxW = Math.max(...widths);
+  const baselines = [];                                           // y down: each line drops by its own height x spacing
+  for (let i = 0, y = 0; i < lines.length; i++) { if (i) y += heights[i] * lineSpacing; baselines.push(y); }
   const contours = [];
 
   lines.forEach((line, i) => {
     if (!line.trim()) return;
     const x0 = align === "left" ? -maxW / 2 : align === "right" ? maxW / 2 - widths[i] : -widths[i] / 2;
-    const path = font.getPath(line, x0, i * letterHeight * lineSpacing, size);   // y down
+    const path = font.getPath(line, x0, baselines[i], sizes[i]);   // y down
     let cur = null, px = 0, py = 0;
     const close = () => { if (cur && cur.length > 2) contours.push(cur); cur = null; };
     for (const c of path.commands) {

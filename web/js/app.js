@@ -16,6 +16,7 @@ const $ = (id) => document.getElementById(id);
 const STORE = "gpx2stl-settings-v1";
 
 // ------------------------------------------------------------------ settings
+const MIN_LETTER = 2.5;   // mm capital height; Atkinson Bold stems are 0.23x that (0.57 mm), > a 0.4 mm nozzle line
 const SLIDERS = {
   "area-controls": [
     { key: "marginKm", label: "Terrain around route", unit: "km", min: 0.2, max: 10, step: 0.1, resetsArea: true },
@@ -38,7 +39,8 @@ const SLIDERS = {
     { key: "inlayMaxHeight", label: "Tallest piece", unit: "mm", min: 6, max: 30, step: 1, help: "Allowing taller pieces means fewer of them" },
   ],
   "label-controls": [
-    { key: "labelSize", label: "Letter height", unit: "mm", min: 2, max: 12, step: 0.5, help: "Height of capital letters" },
+    { key: "labelTitleSize", label: "Title size", unit: "mm", min: MIN_LETTER, hardMin: MIN_LETTER, max: 15, step: 0.5, help: "First line (the route name), capital height" },
+    { key: "labelSize", label: "Text size", unit: "mm", min: MIN_LETTER, hardMin: MIN_LETTER, max: 12, step: 0.5, help: "The other lines. Below 2.5 mm, strokes get too thin for a 0.4 mm nozzle" },
     { key: "labelRelief", label: "Lettering depth", unit: "mm", min: 0.4, max: 2, step: 0.1, help: "How far letters stand up, or are cut in" },
     { key: "labelAngle", label: "Rotation", unit: "°", min: -180, max: 180, step: 1, help: "Or drag the rotate handle above the label on the map" },
   ],
@@ -53,13 +55,14 @@ const UI_DEFAULTS = {
   trailStyle: "raised", trailDepth: Math.abs(DEFAULTS.trailHeight), trailWidth: DEFAULTS.trailWidth,
   base: DEFAULTS.base, cornerRadius: DEFAULTS.cornerRadius, smooth: DEFAULTS.smooth,
   startMarker: "triangle", endMarker: "square", markerSize: DEFAULTS.markerSize, markerHeight: DEFAULTS.markerHeight,
-  labelOn: false, labelStyle: "raised", labelSize: 4, labelRelief: 0.8, labelAngle: 0,
+  labelOn: false, labelStyle: "raised", labelSize: 4, labelTitleSize: 6, labelAlign: "center", labelRelief: 0.8, labelAngle: 0,
   inlayClearance: 0.15, inlayDepth: 3, inlayMaxHeight: 10,
   labelUnits: /^en-(US|LR|MM)$/i.test(navigator.language) ? "imperial" : "metric",
 };
 
 let settings = { ...UI_DEFAULTS };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(STORE)) ?? {}); } catch {}
+for (const k of ["labelSize", "labelTitleSize"]) settings[k] = Math.max(MIN_LETTER, settings[k]);   // older saves allowed 2 mm
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch {} };
 
 const engineOpts = () => ({
@@ -90,14 +93,14 @@ for (const [container, defs] of Object.entries(SLIDERS)) {
     const set = (v, from) => {
       v = parseFloat(v);
       if (!Number.isFinite(v)) return;
-      if (from !== num) num.value = v;
+      if (from !== num || +num.value !== v) num.value = v;   // also show a clamped typed value
       if (from !== range) range.value = v;
       settings[d.key] = v;
       if (d.resetsArea) override = null;
       changed();
     };
     range.addEventListener("input", () => set(range.value, range));
-    num.addEventListener("change", () => set(Math.min(d.max * 4, Math.max(Math.min(0, d.min), num.value)), num));
+    num.addEventListener("change", () => set(Math.min(d.max * 4, Math.max(d.hardMin ?? Math.min(0, d.min), num.value)), num));
     inputs[d.key] = (v) => { num.value = v; range.value = v; };
     $(container).append(el);
   }
@@ -131,7 +134,7 @@ $("shape").addEventListener("click", (e) => {
 $("shape").addEventListener("click", () => frame && fpMap.fit());
 const segSyncs = [bindSeg("detail", "cell", parseFloat), bindSeg("trail-style", "trailStyle"), bindSeg("shape", "shape"),
                   bindSeg("start-marker", "startMarker"), bindSeg("end-marker", "endMarker"),
-                  bindSeg("label-units", "labelUnits"), bindSeg("label-style", "labelStyle"),
+                  bindSeg("label-units", "labelUnits"), bindSeg("label-style", "labelStyle"), bindSeg("label-align", "labelAlign"),
                   () => { $("label-on").checked = settings.labelOn; $("label-body").hidden = !settings.labelOn; }];
 
 function syncControls() {
@@ -193,15 +196,38 @@ import("opentype.js")
   .catch((err) => console.warn("Label font failed to load", err));
 
 /** Text laid out for the plate: { contours, w, h (plate mm), path (SVG) } or null. */
+let printSize = null;          // { w, d } of the print in mm, from the latest plan
+
+/**
+ * Text laid out for the plate: { contours, w, h (plate mm), path (SVG), shrink } or null.
+ * If the plate would be too big for the print (wider than 90% or taller than 60% of it), the text
+ * is scaled down to fit and `shrink` says by how much.
+ */
 function labelPlate() {
   if (!settings.labelOn || !font) return null;
-  const k = `${settings.labelSize}|${labelText}`;
+  const { labelSize: body, labelTitleSize: title, labelAlign: align } = settings;
+  const k = `${body}|${title}|${align}|${printSize?.w.toFixed(0)}|${printSize?.d.toFixed(0)}|${labelText}`;
   if (labelCache.k !== k) {
-    const t = layoutText(font, labelText, settings.labelSize);
-    const pad = Math.max(2, settings.labelSize * 0.6);
-    labelCache = { k, v: t && { contours: t.contours, w: t.width + 2 * pad, h: t.height + 2 * pad, path: contoursToSvgPath(t.contours) } };
+    const lay = (f) => {
+      const t = layoutText(font, labelText, body * f, { titleHeight: title * f, align });
+      const pad = Math.max(2, Math.max(body, title) * f * 0.5);
+      return t && { contours: t.contours, w: t.width + 2 * pad, h: t.height + 2 * pad };
+    };
+    let t = lay(1), shrink = 1;
+    if (t && printSize) {
+      shrink = Math.min(1, (0.9 * printSize.w) / t.w, (0.6 * printSize.d) / t.h);
+      if (shrink < 0.999) t = lay(shrink);
+    }
+    labelCache = { k, v: t && { ...t, path: contoursToSvgPath(t.contours), shrink } };
   }
-  return labelCache.v;
+  const v = labelCache.v, note = $("label-fit");
+  note.hidden = !v || v.shrink >= 0.999;
+  if (v && v.shrink < 0.999) {
+    const smallest = Math.min(body, title) * v.shrink;
+    note.textContent = `Text shrunk to ${Math.round(v.shrink * 100)}% to fit the print` +
+      (smallest < MIN_LETTER ? ` (${smallest.toFixed(1)} mm letters may be too fine to print; try fewer or shorter lines).` : ".");
+  }
+  return v;
 }
 
 function labelEngineOpts() {
@@ -521,6 +547,7 @@ function changed({ fromMap = false, labelDrag = false } = {}) {
   const est = $("estimate"), btn = $("generate");
   if (!route) { est.textContent = ""; btn.disabled = true; return; }
   const p = planGrid(segs, engineOpts());
+  printSize = { w: p.width, d: p.depth };
   updateArea(p, fromMap, labelDrag);
   const bytes = 84 + 50 * p.triangles;
   const tooMany = p.tiles.count > 400;

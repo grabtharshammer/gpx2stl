@@ -58,6 +58,9 @@ Map dots snap via `routeIndex.nearest` (planar metres in the frame).
 - Rotation: `label.angle` degrees CCW. Engine rotates plate + text CrossSections and tests terrain
   cells / vertex colours in the plate's own frame. The map's SVG overlay is axis-aligned, so it
   spans the rotated bounding box and draws the plate rotated inside (`rotate(-angle)`, SVG is y-down).
+- Sizes: `labelTitleSize` (first line) and `labelSize` (rest), min 2.5 mm (Atkinson Bold stems are
+  0.228x cap height). `labelPlate` shrinks the text if the plate would exceed 90% of the print's
+  width or 60% of its depth, and says so in `#label-fit`.
 - Auto placement: summed-area table of route cells, nearest to bottom-centre without covering
   the route and inside the footprint.
 - Multi-colour 3MF: the engine returns `parts3mf` [{name, role, mesh}] (terrain, route pieces,

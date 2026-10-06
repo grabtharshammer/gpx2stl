@@ -185,6 +185,20 @@ async function run(name, { width, height, dark }) {
   await page.screenshot({ path: join(shots, `${name}-map-label.png`) });
   await drag(".fp-label-handle", 30, -50);
   console.log(`${name}: after moving the label: ${await info()}`);
+  // sizes: typed values below the printable minimum are clamped; oversized text shrinks to fit
+  await page.$eval("#label-controls input[type=number]", (n) => { n.value = 1; n.dispatchEvent(new Event("change")); });
+  const titleMin = await page.$eval("#label-controls input[type=number]", (n) => +n.value);
+  if (titleMin !== 2.5) fail(`${name}: title size went to ${titleMin}, below the 2.5 mm minimum`);
+  await page.$eval("#r-labelTitleSize", (r) => { r.value = 15; r.dispatchEvent(new Event("input")); });
+  await page.$eval("#r-labelSize", (r) => { r.value = 12; r.dispatchEvent(new Event("input")); });
+  const fit = await page.$eval("#label-fit", (e) => (e.hidden ? "" : e.textContent));
+  console.log(`${name}: oversized label: ${fit || "(no note)"}`);
+  if (!/shrunk to \d+% to fit/.test(fit)) fail(`${name}: oversized label wasn't shrunk to fit`);
+  await page.$eval("#r-labelTitleSize", (r) => { r.value = 6; r.dispatchEvent(new Event("input")); });
+  await page.$eval("#r-labelSize", (r) => { r.value = 4; r.dispatchEvent(new Event("input")); });
+  await click('#label-align [data-v="left"]');
+  await sleep(500);
+  await page.screenshot({ path: join(shots, `${name}-map-label-sizes.png`) });
   await build("raised label");
   if (await page.$eval("#download-3mf", (b) => b.hidden)) fail(`${name}: no 3MF option with a label`);
   await page.screenshot({ path: join(shots, `${name}-model-label.png`) });
