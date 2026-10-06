@@ -758,7 +758,7 @@ $("download-3mf").addEventListener("click", () => {
   saveBlob(make3mf([
     { name: "Terrain", positions: model.positions, indices: model.indices, color: "#D8D2C2" },
     ...model.inlays.map((q, k) => ({ name: `Route ${k + 1}`, positions: q.positions, indices: q.indices, color: "#E8590C" })),
-  ]), `${fileBase()}.3mf`);
+  ], route.name), `${fileBase()}.3mf`);
 });
 
 syncControls();
