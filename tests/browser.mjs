@@ -171,6 +171,27 @@ async function run(name, { width, height, dark }) {
   await click("#trim-reset");
   if (!/Or drag/.test(await page.$eval("#trim-note", (e) => e.innerText))) fail(`${name}: trim reset failed`);
 
+  // label: prefilled from the GPX + terrain, placed on the map, raised then engraved
+  await click("#label-on");
+  await page.waitForFunction(() => /High point/.test(document.getElementById("label-text").value), { timeout: 60000 });
+  const ltxt = await page.$eval("#label-text", (e) => e.value);
+  console.log(`${name}: label prefill: ${ltxt.replace(/\n/g, " | ")}`);
+  if (!/WHOLE enchilada/.test(ltxt) || !/ (mi|km) · \+[\d,]+ \/ -[\d,]+ (ft|m)/.test(ltxt)) fail(`${name}: unexpected label text`);
+  await page.waitForSelector(".fp-label-handle");
+  await sleep(800);
+  const placed = await info();
+  console.log(`${name}: label placed automatically: ${placed}`);
+  if (/covers part of the route|hangs off/.test(placed)) fail(`${name}: automatic label spot overlaps: ${placed}`);
+  await page.screenshot({ path: join(shots, `${name}-map-label.png`) });
+  await drag(".fp-label-handle", 30, -50);
+  console.log(`${name}: after moving the label: ${await info()}`);
+  await build("raised label");
+  await page.screenshot({ path: join(shots, `${name}-model-label.png`) });
+  await click('#label-style [data-v="engraved"]');
+  await build("engraved label");
+  await page.screenshot({ path: join(shots, `${name}-model-label-engraved.png`) });
+  await click('#tabs [data-tab="map"]');
+
   // free resize in Fit mode switches to Custom
   await click('#tabs [data-tab="map"]');
   await click('#shape [data-v="fit"]');

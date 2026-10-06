@@ -6,6 +6,8 @@ import { writeStl } from "./core/stl.js";
 import { FootprintMap } from "./mapview.js";
 import { outline, roundedOutline, insidePolygon, fitHexagon } from "./core/footprint.js";
 import { MARKER_SHAPES, markerPolygon } from "./core/markers.js";
+import { layoutText, contoursToSvgPath } from "./core/text.js";
+import { routeTimes } from "./core/profile.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "gpx2stl-settings-v1";
@@ -27,6 +29,10 @@ const SLIDERS = {
     { key: "markerSize", label: "Marker size", unit: "mm", min: 1, max: 15, step: 0.5 },
     { key: "markerHeight", label: "Marker height", unit: "mm", min: 0.5, max: 6, step: 0.5, help: "Above the highest ground under it" },
   ],
+  "label-controls": [
+    { key: "labelSize", label: "Letter height", unit: "mm", min: 2, max: 12, step: 0.5, help: "Height of capital letters" },
+    { key: "labelRelief", label: "Lettering depth", unit: "mm", min: 0.4, max: 2, step: 0.1, help: "How far letters stand up, or are cut in" },
+  ],
   "advanced-controls": [
     { key: "base", label: "Base thickness", unit: "mm", min: 1, max: 15, step: 0.5, help: "Under the lowest point" },
     { key: "cornerRadius", label: "Corner radius", unit: "mm", min: 0, max: 40, step: 1, help: "0 for square corners" },
@@ -38,6 +44,8 @@ const UI_DEFAULTS = {
   trailStyle: "raised", trailDepth: Math.abs(DEFAULTS.trailHeight), trailWidth: DEFAULTS.trailWidth,
   base: DEFAULTS.base, cornerRadius: DEFAULTS.cornerRadius, smooth: DEFAULTS.smooth,
   startMarker: "triangle", endMarker: "square", markerSize: DEFAULTS.markerSize, markerHeight: DEFAULTS.markerHeight,
+  labelOn: false, labelStyle: "raised", labelSize: 4, labelRelief: 0.8,
+  labelUnits: /^en-(US|LR|MM)$/i.test(navigator.language) ? "imperial" : "metric",
 };
 
 let settings = { ...UI_DEFAULTS };
@@ -53,6 +61,7 @@ const engineOpts = () => ({
   shape: footprintShape(),
   startMarker: settings.startMarker, endMarker: settings.endMarker,
   markerSize: settings.markerSize, markerHeight: settings.markerHeight,
+  label: labelEngineOpts(),
 });
 
 const inputs = {};
@@ -109,7 +118,9 @@ $("shape").addEventListener("click", (e) => {
 // bubble phase: after the new shape is applied, bring the whole box into view
 $("shape").addEventListener("click", () => frame && fpMap.fit());
 const segSyncs = [bindSeg("detail", "cell", parseFloat), bindSeg("trail-style", "trailStyle"), bindSeg("shape", "shape"),
-                  bindSeg("start-marker", "startMarker"), bindSeg("end-marker", "endMarker")];
+                  bindSeg("start-marker", "startMarker"), bindSeg("end-marker", "endMarker"),
+                  bindSeg("label-units", "labelUnits"), bindSeg("label-style", "labelStyle"),
+                  () => { $("label-on").checked = settings.labelOn; $("label-body").hidden = !settings.labelOn; }];
 
 function syncControls() {
   for (const [k, set] of Object.entries(inputs)) set(settings[k]);
@@ -132,7 +143,148 @@ let routePts = [];     // trimmed route points in the frame, metres
 let bounds = null;     // their bounding box
 let override = null;   // print area set on the map, { x0, x1, y0, y1 } metres; null = automatic
 let model = null;      // last built model
+let profile = null;    // elevation along the (trimmed) route from the terrain tiles: { max, min, gain, loss }
 let builtFor = null;   // JSON of the settings + route the model was built with
+
+// ------------------------------------------------------------------ label
+let font = null;              // opentype.js Font, loaded at startup
+let labelText = "";
+let labelEdited = false;      // once the user types, stop refilling the text from the GPX
+let labelPos = null;          // label centre set on the map (frame metres); null = automatic
+let labelCenter = null;       // where the label actually goes (labelPos or the automatic spot)
+let labelCache = {};
+
+import("opentype.js")
+  .then(async (ot) => {
+    font = ot.parse(await (await fetch("fonts/AtkinsonHyperlegible-Bold.ttf")).arrayBuffer());
+    changed();
+  })
+  .catch((err) => console.warn("Label font failed to load", err));
+
+/** Text laid out for the plate: { contours, w, h (plate mm), path (SVG) } or null. */
+function labelPlate() {
+  if (!settings.labelOn || !font) return null;
+  const k = `${settings.labelSize}|${labelText}`;
+  if (labelCache.k !== k) {
+    const t = layoutText(font, labelText, settings.labelSize);
+    const pad = Math.max(2, settings.labelSize * 0.6);
+    labelCache = { k, v: t && { contours: t.contours, w: t.width + 2 * pad, h: t.height + 2 * pad, path: contoursToSvgPath(t.contours) } };
+  }
+  return labelCache.v;
+}
+
+function labelEngineOpts() {
+  const L = labelPlate();
+  if (!L || !labelCenter || !frame) return null;
+  const [lat, lon] = frame.toLL(labelCenter.x, labelCenter.y);
+  return { center: { lat, lon }, contours: L.contours, width: L.w, height: L.h,
+           style: settings.labelStyle, relief: settings.labelRelief };
+}
+
+const num = (v, digits = 0) => v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+/** Name, distance, climbing, high point, date and duration, in the chosen units. */
+function autoLabelText() {
+  const imperial = settings.labelUnits === "imperial", dist = routeLength(segs);
+  const elev = (m) => num(Math.round(imperial ? m * 3.28084 : m)), unit = imperial ? "ft" : "m";
+  const lines = [route.name];
+  let l2 = imperial ? `${num(dist / 1609.344, 1)} mi` : `${num(dist / 1000, 1)} km`;
+  if (profile) l2 += ` · +${elev(profile.gain)} / -${elev(profile.loss)} ${unit}`;
+  lines.push(l2);
+  const l3 = [];
+  if (profile) l3.push(`High point ${elev(profile.max)} ${unit}`);
+  const t = routeTimes(segs);
+  if (t) {
+    const mins = Math.round((t.end - t.start) / 60000);
+    l3.push(new Date(t.start).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }),
+            `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m`);
+  }
+  if (l3.length) lines.push(l3.join(" · "));
+  return lines.join("\n");
+}
+
+function refreshLabelText() {
+  if (!route) return;
+  if (!labelEdited) {
+    labelText = autoLabelText();
+    if ($("label-text").value !== labelText) $("label-text").value = labelText;
+  }
+  $("label-status").textContent = labelEdited ? "Edited." : profile ? "From the GPX and terrain." : "Loading elevation…";
+}
+
+$("label-on").addEventListener("change", (e) => { settings.labelOn = e.target.checked; syncControls(); changed(); });
+$("label-text").addEventListener("input", (e) => { labelText = e.target.value; labelEdited = true; changed(); });
+$("label-fill").addEventListener("click", () => { labelEdited = false; changed(); });
+
+// elevation profile for the label, in its own worker so builds don't cancel it
+let profileWorker = null, profileReq = 0, profileTimer = null;
+function requestProfile() {
+  clearTimeout(profileTimer);
+  profile = null;
+  profileTimer = setTimeout(() => {
+    profileWorker ??= new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+    const id = ++profileReq;
+    profileWorker.onmessage = ({ data }) => {
+      if (data.id !== profileReq) return;
+      profile = data.type === "profile" ? data.profile : null;
+      changed();
+    };
+    profileWorker.postMessage({ id, job: "profile", segments: segs });
+  }, 300);
+}
+
+/**
+ * Automatic label spot: inside the footprint, clear of the route, as close to bottom-centre as
+ * possible. Route coverage is counted on a grid of `cellM` cells with a summed-area table.
+ */
+function autoLabelSpot(a, wM, hM, inset, cellM, fits) {
+  const gw = Math.ceil((a.x1 - a.x0) / cellM), gh = Math.ceil((a.y1 - a.y0) / cellM);
+  const sat = new Int32Array((gw + 1) * (gh + 1));
+  const mark = (x, y) => {
+    const i = Math.floor((x - a.x0) / cellM), j = Math.floor((y - a.y0) / cellM);
+    if (i >= 0 && i < gw && j >= 0 && j < gh) sat[(j + 1) * (gw + 1) + i + 1] = 1;
+  };
+  for (const s of segs) {
+    const m = s.map(frame.toM);
+    for (let k = 1; k < m.length; k++) {            // walk each leg so long straight legs count too
+      const n = Math.ceil(Math.hypot(m[k][0] - m[k - 1][0], m[k][1] - m[k - 1][1]) / (cellM / 2));
+      for (let t = 0; t <= n; t++) mark(m[k - 1][0] + ((m[k][0] - m[k - 1][0]) * t) / n, m[k - 1][1] + ((m[k][1] - m[k - 1][1]) * t) / n);
+    }
+  }
+  for (let j = 1; j <= gh; j++)
+    for (let i = 1; i <= gw; i++)
+      sat[j * (gw + 1) + i] += sat[(j - 1) * (gw + 1) + i] + sat[j * (gw + 1) + i - 1] - sat[(j - 1) * (gw + 1) + i - 1];
+  const covered = (x, y) => {                       // route cells under the plate (plus a cell of margin)
+    const i0 = Math.max(0, Math.floor((x - wM / 2 - a.x0) / cellM) - 1), i1 = Math.min(gw, Math.ceil((x + wM / 2 - a.x0) / cellM) + 1);
+    const j0 = Math.max(0, Math.floor((y - hM / 2 - a.y0) / cellM) - 1), j1 = Math.min(gh, Math.ceil((y + hM / 2 - a.y0) / cellM) + 1);
+    return sat[j1 * (gw + 1) + i1] - sat[j0 * (gw + 1) + i1] - sat[j1 * (gw + 1) + i0] + sat[j0 * (gw + 1) + i0];
+  };
+  const home = { x: (a.x0 + a.x1) / 2, y: a.y0 + hM / 2 + inset };
+  let best = null;
+  for (let y = a.y0 + hM / 2; y <= a.y1 - hM / 2; y += cellM)
+    for (let x = a.x0 + wM / 2; x <= a.x1 - wM / 2; x += cellM) {
+      if (!fits(x, y)) continue;
+      const score = covered(x, y) * 1e12 + Math.hypot(x - home.x, (y - home.y) * 2);   // prefer low over sideways
+      if (!best || score < best.score) best = { x, y, score };
+    }
+  return best ? { x: best.x, y: best.y } : { x: home.x, y: (a.y0 + a.y1) / 2 };
+}
+
+/** Put the label where the user dragged it, or in the automatic spot. */
+function placeLabel(p, a, poly, skipMap) {
+  const L = labelPlate();
+  if (!L) { labelCenter = null; fpMap.setLabel(null); return []; }
+  const wM = L.w / p.sc, hM = L.h / p.sc, inset = 3 / p.sc;
+  const fits = (x, y, pad) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([sx, sy]) =>
+    insidePolygon(poly, x + sx * (wM / 2 + pad) - a.x0, y + sy * (hM / 2 + pad) - a.y0));
+  const c = labelPos ?? autoLabelSpot(a, wM, hM, inset, 2 / p.sc, (x, y) => fits(x, y, inset));
+  labelCenter = c;
+  if (!skipMap) fpMap.setLabel({ x: c.x, y: c.y, wM, hM, w: L.w, h: L.h, path: L.path });
+  const warn = [];
+  if (!fits(c.x, c.y, 0)) warn.push("The label hangs off the print");
+  if (routePts.some(([x, y]) => Math.abs(x - c.x) < wM / 2 && Math.abs(y - c.y) < hM / 2)) warn.push("The label covers part of the route");
+  return warn;
+}
 
 // ------------------------------------------------------------------ print area
 const RATIOS = { square: 1, "3:2": 1.5 };
@@ -152,6 +304,7 @@ function applyTrim() {
     bounds.ymin = Math.min(bounds.ymin, y); bounds.ymax = Math.max(bounds.ymax, y);
   }
   fpMap.setTrimmed(segs);
+  requestProfile();
   $("trim-from").value = trim.from;
   $("trim-to").value = trim.to;
   $("trim-from-v").textContent = fmtKm(trim.from);
@@ -215,21 +368,26 @@ const fpMap = new FootprintMap($("map"), {
     if (settings.shape === "fit") { settings.shape = "custom"; syncControls(); }
     changed({ fromMap: !final });
   },
+  onLabelMove(x, y, final) {
+    labelPos = { x, y };
+    changed({ fromMap: true, labelDrag: !final });
+  },
   onTrim(end, lat, lon) {
     setTrim(end, index.nearest(...frame.toM([lat, lon])).distance);
     return end === "start" ? segs[0][0] : segs.at(-1).at(-1);
   },
 });
 
-function updateArea(p, fromMap) {
+function updateArea(p, fromMap, labelDrag) {
   const a = currentArea();
   const cornerM = settings.cornerRadius / p.sc;
   if (!fromMap) fpMap.setFootprint(a, cornerM, aspect(), footprintShape());
   const km = (m) => (m / 1000).toFixed(m < 10000 ? 1 : 0);
   const poly = roundedOutline(outline(footprintShape(), a.x1 - a.x0, a.y1 - a.y0), cornerM);
-  const cropped = routePts.some(([x, y]) => !insidePolygon(poly, x - a.x0, y - a.y0));
+  const warn = placeLabel(p, a, poly, labelDrag);
+  if (routePts.some(([x, y]) => !insidePolygon(poly, x - a.x0, y - a.y0))) warn.unshift("Part of the route is outside the print area");
   $("map-info").innerHTML = `${km(a.x1 - a.x0)} × ${km(a.y1 - a.y0)} km → <b>${p.width.toFixed(0)} × ${p.depth.toFixed(0)} mm</b>` +
-    (cropped ? `<br><span class="warn">Part of the route is outside the print area</span>` : "");
+    warn.map((w) => `<br><span class="warn">${w}</span>`).join("");
   $("area-note").innerHTML = override
     ? `Area adjusted on the map. <button class="link" type="button" id="area-reset">Reset</button>`
     : "Drag the box on the map to move it, or its corners to resize.";
@@ -275,6 +433,8 @@ async function loadText(text, fileName) {
   frame = routeFrame(route.segments);
   index = routeIndex(route.segments, frame.toM);
   trim = { from: 0, to: index.length };
+  labelEdited = false;
+  labelPos = null;
   for (const id of ["trim-from", "trim-to"]) Object.assign($(id), { max: index.length });
   override = null;
   if (settings.shape === "custom") settings.shape = "fit";
@@ -314,12 +474,13 @@ for (const t of [document.body]) {
 const fmtMB = (bytes) => (bytes / 1e6 < 10 ? (bytes / 1e6).toFixed(1) : Math.round(bytes / 1e6)) + " MB";
 const key = () => route && JSON.stringify([route.fileName, route.segments.length, trim, engineOpts()]);
 
-function changed({ fromMap = false } = {}) {
+function changed({ fromMap = false, labelDrag = false } = {}) {
   save();
+  refreshLabelText();
   const est = $("estimate"), btn = $("generate");
   if (!route) { est.textContent = ""; btn.disabled = true; return; }
   const p = planGrid(segs, engineOpts());
-  updateArea(p, fromMap);
+  updateArea(p, fromMap, labelDrag);
   const bytes = 84 + 50 * p.triangles;
   const tooMany = p.tiles.count > 400;
   est.classList.toggle("warn", tooMany || p.triangles > 4e6);
@@ -391,8 +552,15 @@ function setProgress(stage, frac) {
 
 // ------------------------------------------------------------------ 3D viewer
 const canvas = $("canvas");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// without WebGL the app still builds and downloads models; only the preview is missing
+let renderer = null;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+} catch (err) {
+  console.warn("3D preview unavailable:", err.message);
+  $("no-gl").hidden = false;
+}
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(35, 1, 1, 5000);
 camera.up.set(0, 0, 1);
@@ -412,7 +580,7 @@ dark.addEventListener("change", applyTheme);
 new ResizeObserver(() => {
   const { clientWidth: w, clientHeight: h } = canvas.parentElement;
   if (!w || !h) return;
-  renderer.setSize(w, h, false);
+  renderer?.setSize(w, h, false);
   requestRender();
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -420,7 +588,7 @@ new ResizeObserver(() => {
 // render on demand only: a big model redrawn every frame drains batteries (and stalls software GL)
 let renderQueued = false;
 function requestRender() {
-  if (renderQueued) return;
+  if (renderQueued || !renderer) return;
   renderQueued = true;
   requestAnimationFrame(() => {
     renderQueued = false;
@@ -450,7 +618,8 @@ function showModel(m, reframe = true) {
   g.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
   g.setIndex(new THREE.BufferAttribute(m.indices, 1));
   const palette = [new THREE.Color(dark.matches ? 0xb9b3a4 : 0xd8d2c2), new THREE.Color(css("--accent")),
-                   new THREE.Color(css("--start")), new THREE.Color(css("--finish"))];   // see core/model.js
+                   new THREE.Color(css("--start")), new THREE.Color(css("--finish")),
+                   new THREE.Color(css("--plate")), new THREE.Color(css("--lettering"))];   // see core/model.js
   const col = new Float32Array(m.trail.length * 3);
   for (let i = 0; i < m.trail.length; i++) palette[m.trail[i]].toArray(col, i * 3);
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));

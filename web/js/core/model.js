@@ -24,6 +24,9 @@ export const DEFAULTS = {
   endMarker: "none",
   markerSize: 6,      // mm across
   markerHeight: 2,    // mm above the highest terrain under the marker
+  // Label plate, or null. { center: {lat, lon}, contours (mm, centred, non-zero fill, from
+  // text.js layoutText), width, height (plate, mm), style: "raised"|"engraved", relief (mm) }
+  label: null,
   zoom: null,         // tile zoom; null = choose from cell size
   origin: null,       // { lat, lon } projection centre; null = mean of the route points
 };
@@ -225,7 +228,19 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   const first = segments[0].map(plan.toM), last = segments.at(-1).map(plan.toM).reverse();
   markerAt(2, o.startMarker, first);
   markerAt(3, o.endMarker, last);
-  const ztop = Math.max(zmax, ...markers.map((m) => m.top));
+  // label plate: flat top level with the highest ground under it
+  let label = null;
+  if (o.label?.contours?.length) {
+    const L = o.label, [lx, ly] = plan.toM([L.center.lat, L.center.lon]);
+    const cx = (lx - xmin) * sc, cy = (ly - ymin) * sc, hw = L.width / 2, hh = L.height / 2;
+    let top = 0;
+    for (let j = Math.max(0, Math.floor((cy - hh) / cell)); j <= Math.min(ny - 1, Math.ceil((cy + hh) / cell)); j++)
+      for (let i = Math.max(0, Math.floor((cx - hw) / cell)); i <= Math.min(nx - 1, Math.ceil((cx + hw) / cell)); i++)
+        top = Math.max(top, Zt[j * nx + i]);
+    if (top > 0) label = { ...L, cx, cy, top: top + 0.2 };   // 0.2 mm proud so the plate edge reads
+  }
+  const ztop = Math.max(zmax, ...markers.map((m) => m.top),
+                        label ? label.top + (label.style === "engraved" ? 0 : label.relief) : 0);
 
   progress("solid", 0);
   const { Manifold, Mesh, CrossSection } = manifold;
@@ -236,6 +251,17 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
     for (const m of markers) {
       const cs = keep(keep(new CrossSection([m.poly])).intersect(keep(CrossSection.square([W, D]))));
       solid = keep(solid.add(keep(Manifold.extrude(cs, m.top))));
+    }
+    if (label) {
+      const { cx, cy, width: w, height: h, top } = label, pr = Math.min(1.5, w / 4, h / 4);
+      const plate = keep(keep(keep(keep(CrossSection.square([w - 2 * pr, h - 2 * pr])).translate([cx - w / 2 + pr, cy - h / 2 + pr]))
+        .offset(pr, "Round", 2, 32)).intersect(keep(CrossSection.square([W, D]))));
+      solid = keep(solid.add(keep(Manifold.extrude(plate, top))));
+      const text = keep(keep(keep(new CrossSection(label.contours, "NonZero")).translate([cx, cy]))
+        .intersect(keep(CrossSection.square([W, D]))));
+      solid = label.style === "engraved"
+        ? keep(solid.subtract(keep(keep(Manifold.extrude(text, label.relief + 1)).translate([0, 0, top - label.relief]))))
+        : keep(solid.add(keep(keep(Manifold.extrude(text, label.relief)).translate([0, 0, top]))));
     }
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
     if (o.shape === "hex") {
@@ -264,6 +290,11 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       for (const m of markers) {            // 2 = start marker, 3 = finish marker
         const k = 1.04, mx = m.cx + (x - m.cx) / k, my = m.cy + (y - m.cy) / k;   // slightly generous
         if (zz > 0.01 && inPolygon(m.poly, mx, my)) trail[v] = m.kind;
+      }
+      if (label && Math.abs(x - label.cx) <= label.width / 2 + 0.01 && Math.abs(y - label.cy) <= label.height / 2 + 0.01) {
+        // 4 = label plate, 5 = lettering (top and sides of raised text, or floor and sides of engraving)
+        if (Math.abs(zz - label.top) < 0.005) trail[v] = 4;
+        else if (zz > label.top - label.relief - 0.005 && zz <= label.top + label.relief + 0.005) trail[v] = 5;
       }
     }
     const indices = new Uint32Array(mesh.triVerts);

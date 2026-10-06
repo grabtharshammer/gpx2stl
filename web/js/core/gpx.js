@@ -13,18 +13,28 @@ function blocks(text, tag) {
   return [...text.matchAll(re)].map((m) => m[1]);
 }
 
+const EPOCH_MIN = Date.UTC(1990, 0, 1);   // older timestamps are placeholders (Trailforks writes 1970)
+
 function points(text, tag) {
-  const re = new RegExp(`<(?:[\\w-]+:)?${tag}\\b([^>]*)>`, "g");
+  const re = new RegExp(`<(?:[\\w-]+:)?${tag}\\b([^>]*?)(?:/>|>([\\s\\S]*?)</(?:[\\w-]+:)?${tag}>)`, "g");
   const pts = [];
   for (const m of text.matchAll(re)) {
     const lat = parseFloat(/\blat\s*=\s*["']([^"']+)["']/.exec(m[1])?.[1]);
     const lon = parseFloat(/\blon\s*=\s*["']([^"']+)["']/.exec(m[1])?.[1]);
-    if (Number.isFinite(lat) && Number.isFinite(lon)) pts.push([lat, lon]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const body = m[2] ?? "";
+    let time = Date.parse(/<(?:[\w-]+:)?time>([^<]+)</.exec(body)?.[1]);
+    if (!(time > EPOCH_MIN)) time = NaN;
+    const ele = parseFloat(/<(?:[\w-]+:)?ele>([^<]+)</.exec(body)?.[1]);
+    pts.push([lat, lon, time, ele]);
   }
   return pts;
 }
 
-/** Returns { name, segments: [[[lat, lon], ...], ...] }. Elevation in the file is ignored. */
+/**
+ * Returns { name, segments: [[[lat, lon, time, ele], ...], ...] }; time (ms) and ele (m) are NaN
+ * when missing. The model never uses GPX elevation (often absent or zero); it's informational only.
+ */
 export function parseGpx(text) {
   let segments = blocks(text, "trkseg").map((s) => points(s, "trkpt"));
   if (!segments.some((s) => s.length > 1)) segments = blocks(text, "rte").map((s) => points(s, "rtept"));
@@ -52,7 +62,7 @@ export function routeLength(segments) {
   return d;
 }
 
-const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+const lerp = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);   // lat, lon, and time/ele too
 
 /** The part of the route between `from` and `to` metres along it, cut exactly at those points. */
 export function trimSegments(segments, from, to) {

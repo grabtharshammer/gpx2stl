@@ -44,6 +44,21 @@ original segments. Everything downstream (fit area, hexagon, markers, engine) us
 centre, so map and engine agree after trimming (untrimmed, origin = route mean = engine default).
 Map dots snap via `routeIndex.nearest` (planar metres in the frame).
 
+## Label (core/text.js, core/profile.js)
+- Text -> polygons on the main thread (opentype.js 2.0 + vendored `web/fonts/AtkinsonHyperlegible-Bold.ttf`);
+  `layoutText` sizes by cap height, flattens curves, centres on the origin; contours use the
+  non-zero fill rule. The engine gets `opts.label = {center {lat,lon}, contours, width, height,
+  style, relief}`: plate (rounded rect) extruded to max terrain under it + 0.2 mm, text added on
+  top or subtracted (engraved). `trail` codes 4 = plate, 5 = lettering.
+- Prefill: `autoLabelText` (name, distance, +gain/-loss, high point, date, duration) until the
+  user types. Elevation comes from `routeProfile` (terrain tiles along the trimmed route, z12,
+  30 m resampling, 3 m hysteresis) run in a separate worker job ("profile") so builds don't
+  cancel it. GPX points are [lat, lon, time, ele] (NaN when missing; pre-1990 times ignored).
+  Leaflet rejects 4-element points: mapview converts with `ll()`.
+- Auto placement: summed-area table of route cells, nearest to bottom-centre without covering
+  the route and inside the footprint.
+- Without WebGL the app still works (no preview).
+
 ## 3D preview
 Renders on demand (`requestRender`), not every frame: a ~0.5M-triangle model at 60 fps drains
 batteries and stalled the Pi's software GL in the headless tests.

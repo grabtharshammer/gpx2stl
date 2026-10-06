@@ -33,6 +33,8 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 | Trail height/depth, width | 1.0 mm, 1.6 mm | |
 | Start / finish marker | Triangle / Square | None, Triangle, Circle, Square, Star or Hexagon; raised solids that face the direction of travel (the triangle points the way) |
 | Marker size, height | 6 mm, 2 mm | Height is above the highest ground under the marker |
+| Label | off | Text printed on a flat plate (top level with the highest ground under it), raised or engraved. Prefilled with the route name, distance, climb/descent, high point, and date/duration when the GPX has timestamps; edit freely. Drag it on the map; by default it sits low and central, clear of the route |
+| Letter height, lettering depth | 4 mm, 0.8 mm | |
 | Base thickness | 3 mm | Under the lowest point |
 | Corner radius | 10 mm | 0 for square corners |
 | Terrain smoothing | 0.8 | Blur in grid cells |
@@ -52,7 +54,7 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
     cd tests
     npm install
     node regression.mjs                    # engine vs. the Python reference numbers
-    npm install --no-save puppeteer-core
+    (puppeteer-core is a dev dependency; it uses your own Chromium)
     node browser.mjs /path/to/chromium     # full UI flow in headless Chromium
 
 ## Python CLI (reference)
@@ -67,3 +69,4 @@ Elevation: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (te
 USGS 3DEP, GMTED and others), about 30 m resolution in the US at zoom 12.
 Map: [OpenTopoMap](https://opentopomap.org) (© OpenStreetMap contributors, SRTM) via [Leaflet](https://leafletjs.com).
 Geometry: [manifold-3d](https://github.com/elalish/manifold). Preview: [three.js](https://threejs.org).
+Label font: [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) Bold (SIL OFL, `web/fonts/OFL.txt`), read with [opentype.js](https://opentype.js.org).

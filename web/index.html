@@ -13,7 +13,8 @@
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
         "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
-        "leaflet": "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet-src.esm.js"
+        "leaflet": "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet-src.esm.js",
+        "opentype.js": "https://cdn.jsdelivr.net/npm/opentype.js@2.0.0/dist/opentype.mjs"
       }
     }
   </script>
@@ -112,6 +113,31 @@
         <p class="area-note">Markers turn to face the direction of travel.</p>
       </section>
 
+      <section class="card">
+        <h2>6 &middot; Label</h2>
+        <label class="check"><input type="checkbox" id="label-on"> Print a label on the model</label>
+        <div id="label-body" hidden>
+          <textarea id="label-text" rows="4" spellcheck="false" aria-label="Label text"></textarea>
+          <p class="area-note"><span id="label-status"></span> <button class="link" type="button" id="label-fill">Fill in from the GPX</button></p>
+          <div class="field">
+            <span class="label">Units</span>
+            <div class="seg" id="label-units" role="radiogroup" aria-label="Units">
+              <button type="button" data-v="imperial">mi &middot; ft</button>
+              <button type="button" data-v="metric">km &middot; m</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label">Lettering</span>
+            <div class="seg" id="label-style" role="radiogroup" aria-label="Lettering">
+              <button type="button" data-v="raised">Raised</button>
+              <button type="button" data-v="engraved">Engraved</button>
+            </div>
+          </div>
+          <div id="label-controls"></div>
+          <p class="area-note">Drag the label on the map to place it.</p>
+        </div>
+      </section>
+
       <details class="card advanced">
         <summary>Advanced</summary>
         <div id="advanced-controls"></div>
@@ -138,6 +164,7 @@
         <div id="map" class="pane pane-map"></div>
         <div class="map-info" id="map-info"></div>
         <canvas id="canvas" class="pane pane-3d"></canvas>
+        <div class="no-gl pane-3d" id="no-gl" hidden>3D preview isn't available in this browser.<br>You can still build and download the STL.</div>
         <div class="empty" id="empty">
           <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M4 52 24 18l12 18 8-10 16 26z" class="mtn"/><path d="M10 48c8-4 12-12 20-12s10 6 18 2" class="trk"/></svg>
           <p>Load a GPX route to get started.</p>

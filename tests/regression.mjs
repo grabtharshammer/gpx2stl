@@ -11,6 +11,9 @@ import { tileUrl, decodeTerrarium } from "../web/js/core/tiles.js";
 import { buildModel, routeFrame } from "../web/js/core/model.js";
 import { outline, fitHexagon } from "../web/js/core/footprint.js";
 import { writeStl } from "../web/js/core/stl.js";
+import { layoutText } from "../web/js/core/text.js";
+import { routeProfile, routeTimes } from "../web/js/core/profile.js";
+import * as opentype from "opentype.js/dist/opentype.mjs";   // same build the browser loads
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cache = process.argv[2] ?? join(here, "tile_cache");
@@ -107,5 +110,26 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
     bad++; console.log("MISMATCH trimming");
   }
   console.log(bad ? "FAILED" : "OK: trimming");
+}
+// Label: raised and engraved builds are valid solids with plate and lettering present.
+{
+  const fb = await readFile(join(here, "../web/fonts/AtkinsonHyperlegible-Bold.ttf"));
+  const font = opentype.parse(fb.buffer.slice(fb.byteOffset, fb.byteOffset + fb.length));
+  const t = layoutText(font, "the WHOLE enchilada\n29.4 mi · +1,520 / -7,780 ft", 4);
+  const f = routeFrame(gpx.segments), [lat, lon] = f.toLL(0, -6000);
+  for (const style of ["raised", "engraved"]) {
+    const label = { center: { lat, lon }, contours: t.contours, width: t.width + 6, height: t.height + 6, style, relief: 0.8 };
+    const lm = await buildModel(gpx.segments, { label }, { getTile, manifold: wasm });
+    const count = [0, 0, 0, 0, 0, 0];
+    for (const k of lm.trail) count[k]++;
+    console.log(`label ${style}: ${t.width.toFixed(1)} x ${t.height.toFixed(1)} mm text, ${t.contours.length} contours; ` +
+                `plate ${count[4]} / lettering ${count[5]} vertices; ${lm.stats.triangles.toLocaleString("en")} triangles`);
+    if (!count[4] || !count[5]) { bad++; console.log(`MISMATCH label ${style} missing parts`); }
+    if (out) await writeFile(out.replace(/[.]stl$/, `-label-${style}.stl`), Buffer.from(writeStl(lm.positions, lm.indices, "label")));
+  }
+  const prof = await routeProfile(gpx.segments, getTile);
+  console.log(`profile: high ${prof.max.toFixed(0)} m, low ${prof.min.toFixed(0)} m, +${prof.gain.toFixed(0)} / -${prof.loss.toFixed(0)} m; times ${JSON.stringify(routeTimes(gpx.segments))}`);
+  if (!(prof.max > 3000 && prof.min < 1300 && prof.loss > prof.gain)) { bad++; console.log("MISMATCH profile"); }
+  console.log(bad ? "FAILED" : "OK: label + profile");
 }
 process.exit(bad ? 1 : 0);

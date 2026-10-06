@@ -4,6 +4,8 @@ import * as L from "leaflet";
 import { outline, roundedOutline } from "./core/footprint.js";
 
 const MIN_SIDE = 200;   // metres
+const ll = (p) => [p[0], p[1]];   // route points also carry time/elevation, which Leaflet rejects
+const lls = (s) => s.map(ll);
 const OPPOSITE = { sw: "ne", se: "nw", ne: "sw", nw: "se" };
 
 /** Where each resize handle sits, as fractions of the area's box: on the shape's own corners. */
@@ -19,10 +21,12 @@ export class FootprintMap {
    * onChange(area, final) — the print area was moved/resized on the map.
    * onTrim(end, lat, lon, final) — a start/finish dot was dragged; end is "start" or "end".
    *   Returns the [lat, lon] the dot should snap to.
+   * onLabelMove(x, y, final) — the label was dragged to centre (x, y), frame metres.
    */
-  constructor(el, { onChange, onTrim }) {
+  constructor(el, { onChange, onTrim, onLabelMove }) {
     this.onChange = onChange;
     this.onTrim = onTrim;
+    this.onLabelMove = onLabelMove;
     this.map = L.map(el, { zoomSnap: 0.25, zoomControl: true, attributionControl: true });
     L.tileLayer("https://tile.opentopomap.org/{z}/{x}/{y}.png", {
       maxZoom: 17,
@@ -53,7 +57,7 @@ export class FootprintMap {
       }).addTo(this.map);
       const snap = (final) => {
         const { lat, lng } = d.getLatLng();
-        d.setLatLng(this.onTrim(k, lat, lng, final));
+        d.setLatLng(ll(this.onTrim(k, lat, lng, final)));
       };
       d.on("dragstart", () => (this.draggingDot = k));
       d.on("drag", () => snap(false));
@@ -61,12 +65,75 @@ export class FootprintMap {
       this.dots[k] = d;
     }
     this.#bodyDrag();
+
+    // label: an SVG preview (plate + lettering) dragged by its body or a handle (touch)
+    this.labelSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    this.labelSvg.setAttribute("preserveAspectRatio", "none");
+    this.labelOverlay = L.svgOverlay(this.labelSvg, [[0, 0], [0, 0]], { interactive: true, className: "fp-label-svg" });
+    this.labelHandle = L.marker([0, 0], {
+      draggable: true, keyboard: false, zIndexOffset: 900, title: "Drag to move the label",
+      icon: L.divIcon({ className: "fp-label-handle", iconSize: [22, 22] }),
+    });
+    this.labelHandle.on("drag", () => {
+      const { lat, lng } = this.labelHandle.getLatLng(), [x, y] = this.frame.toM([lat, lng]);
+      this.#moveLabel(x + this.label.wM / 2, y - this.label.hM / 2, false);
+    });
+    this.labelHandle.on("dragend", () => this.#moveLabel(this.label.x, this.label.y, true));
+    let grab = null;
+    this.labelOverlay.on("mousedown", (e) => {
+      if (e.originalEvent.button !== 0) return;
+      L.DomEvent.stop(e);
+      this.map.dragging.disable();
+      const [x, y] = this.frame.toM([e.latlng.lat, e.latlng.lng]);
+      grab = { dx: this.label.x - x, dy: this.label.y - y };
+    });
+    this.map.on("mousemove", (e) => {
+      if (!grab) return;
+      const [x, y] = this.frame.toM([e.latlng.lat, e.latlng.lng]);
+      this.#moveLabel(x + grab.dx, y + grab.dy, false);
+    });
+    const drop = () => {
+      if (!grab) return;
+      grab = null;
+      this.map.dragging.enable();
+      this.#moveLabel(this.label.x, this.label.y, true);
+    };
+    this.map.on("mouseup", drop);
+    document.addEventListener("mouseup", drop);
+  }
+
+  /** label: { x, y, wM, hM (frame metres), w, h (mm), path (SVG path, mm) } or null to hide. */
+  setLabel(label) {
+    this.label = label;
+    if (!label) {
+      this.labelOverlay.remove();
+      this.labelHandle.remove();
+      return;
+    }
+    const { w, h, path } = label;
+    this.labelSvg.setAttribute("viewBox", `${-w / 2} ${-h / 2} ${w} ${h}`);
+    this.labelSvg.innerHTML = `<rect x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" rx="${Math.min(1.5, w / 4, h / 4)}"/><path d="${path}"/>`;
+    this.#placeLabel();
+    this.labelOverlay.addTo(this.map);
+    this.labelHandle.addTo(this.map);
+  }
+
+  #placeLabel() {
+    const { x, y, wM, hM } = this.label, f = this.frame;
+    this.labelOverlay.setBounds([f.toLL(x - wM / 2, y - hM / 2), f.toLL(x + wM / 2, y + hM / 2)]);
+    this.labelHandle.setLatLng(f.toLL(x - wM / 2, y + hM / 2));   // top-left corner
+  }
+
+  #moveLabel(x, y, final) {
+    Object.assign(this.label, { x, y });
+    this.#placeLabel();
+    this.onLabelMove(x, y, final);
   }
 
   setRoute(segments, frame) {
     this.frame = frame;
     this.routeLayer.clearLayers();
-    for (const s of segments) L.polyline(s, { className: "fp-route-full", weight: 3, interactive: false }).addTo(this.routeLayer);
+    for (const s of segments) L.polyline(lls(s), { className: "fp-route-full", weight: 3, interactive: false }).addTo(this.routeLayer);
     this.setTrimmed(segments);
     for (const h of [...Object.values(this.handles), ...Object.values(this.dots)]) h.setOpacity(1);
   }
@@ -74,11 +141,11 @@ export class FootprintMap {
   /** Highlight the printed part of the route and put the start/finish dots on its ends. */
   setTrimmed(segments) {
     this.trimLayer.clearLayers();
-    for (const s of segments) L.polyline(s, { className: "fp-casing", weight: 6, interactive: false }).addTo(this.trimLayer);
-    for (const s of segments) L.polyline(s, { className: "fp-route", weight: 3, interactive: false }).addTo(this.trimLayer);
+    for (const s of segments) L.polyline(lls(s), { className: "fp-casing", weight: 6, interactive: false }).addTo(this.trimLayer);
+    for (const s of segments) L.polyline(lls(s), { className: "fp-route", weight: 3, interactive: false }).addTo(this.trimLayer);
     // the dot being dragged is placed by its own snap
-    if (this.draggingDot !== "start") this.dots.start.setLatLng(segments[0][0]);
-    if (this.draggingDot !== "end") this.dots.end.setLatLng(segments.at(-1).at(-1));
+    if (this.draggingDot !== "start") this.dots.start.setLatLng(ll(segments[0][0]));
+    if (this.draggingDot !== "end") this.dots.end.setLatLng(ll(segments.at(-1).at(-1)));
   }
 
   /**

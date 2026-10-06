@@ -2,6 +2,12 @@
   "name": "gpx2stl-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node regression.mjs" },
-  "devDependencies": { "manifold-3d": "3.5.4" }
+  "scripts": {
+    "test": "node regression.mjs"
+  },
+  "devDependencies": {
+    "manifold-3d": "3.5.4",
+    "opentype.js": "2.0.0",
+    "puppeteer-core": "25.12.0"
+  }
 }
