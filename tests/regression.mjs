@@ -126,6 +126,16 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
     console.log(`label ${style} ${angle}°: ${t.width.toFixed(1)} x ${t.height.toFixed(1)} mm text, ${t.contours.length} contours; ` +
                 `plate ${count[4]} / lettering ${count[5]} vertices; ${lm.stats.triangles.toLocaleString("en")} triangles`);
     if (!count[4] || !count[5]) { bad++; console.log(`MISMATCH label ${style} missing parts`); }
+    // lettering as its own body (for multi-colour 3MF): raised = on top of the plain terrain,
+    // engraved = fills the pocket; either way terrain + lettering adds up to the solid model
+    const vol = (q) => new wasm.Manifold(new wasm.Mesh({ numProp: 3, vertProperties: q.positions, triVerts: q.indices })).volume();
+    const letters = lm.lettering ? vol(lm.lettering) : 0, main = vol(lm);
+    const plainV = lm.plainTerrain ? vol(lm.plainTerrain) : main;
+    const sum = style === "engraved" ? main + letters : plainV + letters;
+    console.log(`  lettering body ${(letters).toFixed(1)} mm3; terrain + lettering ${(sum / 1000).toFixed(3)} vs ` +
+                `${style === "engraved" ? "solid plate" : "merged"} ${(style === "engraved" ? (main + letters) / 1000 : main / 1000).toFixed(3)} cm3`);
+    if (!(letters > 1)) { bad++; console.log(`MISMATCH no lettering body for ${style}`); }
+    if (style !== "engraved" && Math.abs(plainV + letters - main) > 1) { bad++; console.log("MISMATCH raised lettering doesn't add up"); }
     if (out) await writeFile(out.replace(/[.]stl$/, `-label-${style}-${angle}.stl`), Buffer.from(writeStl(lm.positions, lm.indices, "label")));
   }
   const prof = await routeProfile(gpx.segments, getTile);

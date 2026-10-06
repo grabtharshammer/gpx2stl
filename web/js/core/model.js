@@ -124,7 +124,11 @@ async function loadDem(plan, getTile, progress) {
  *   getTile(z, x, y) -> Promise<Float64Array(256*256)> of metres
  *   manifold: initialised manifold-3d wasm module (after .setup())
  * Returns { positions: Float32Array, indices: Uint32Array, trail: Uint8Array (per vertex), stats,
- *           inlays: [{ positions, indices, trail, plane, height, tilt }] (inlay mode only) }.
+ *           inlays: [{ positions, indices, trail, plane, height, tilt }] (inlay mode only),
+ *           lettering: { positions, indices } | null — the label text as its own body (raised
+ *             letters, or the fill of engraved ones) for multi-colour 3MF,
+ *           plainTerrain: { positions, indices } | null — the terrain without raised letters, when
+ *             that differs from the main body (which always has them, for single-colour STL) }.
  */
 export async function buildModel(segments, opts, { getTile, manifold, progress = () => {} }) {
   const plan = planGrid(segments, opts);
@@ -239,6 +243,7 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   const { Manifold, Mesh, CrossSection } = manifold;
   const trash = [];
   const keep = (x) => (trash.push(x), x);
+  let lettering = null;
   try {
     let solid = keep(gridSolid(manifold, Zt, nx, cell, 0, nx - 1, 0, ny - 1));
     for (const m of inl ? [] : markers) {        // with an inlay the markers ride on the inlay instead
@@ -251,9 +256,14 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       const plate = place(keep(keep(CrossSection.square([w - 2 * pr, h - 2 * pr], true)).offset(pr, "Round", 2, 32)));
       solid = keep(solid.add(keep(Manifold.extrude(plate, top))));
       const text = place(keep(new CrossSection(label.contours, "NonZero")));
-      solid = label.style === "engraved"
-        ? keep(solid.subtract(keep(keep(Manifold.extrude(text, label.relief + 1)).translate([0, 0, top - label.relief]))))
-        : keep(solid.add(keep(keep(Manifold.extrude(text, label.relief)).translate([0, 0, top]))));
+      // the lettering stays a separate body until the end, so a 3MF can give it its own filament:
+      // raised letters stand on the plate; engraved ones get a fill that is flush with it
+      if (label.style === "engraved") {
+        solid = keep(solid.subtract(keep(keep(Manifold.extrude(text, label.relief + 1)).translate([0, 0, top - label.relief]))));
+        lettering = keep(keep(Manifold.extrude(text, label.relief)).translate([0, 0, top - label.relief]));
+      } else {
+        lettering = keep(keep(Manifold.extrude(text, label.relief)).translate([0, 0, top]));
+      }
     }
     // separate inlay: slot cut into the terrain, pieces built to drop into it
     const pieces = [];
@@ -295,7 +305,11 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         taken = taken ? keep(taken.add(outer)) : outer;
         pieces.push({ solid: piece, plane: pc.plane, height: pc.height, tilt: pc.tilt, markers: mk });
       });
-      if (cuts.length) solid = keep(solid.subtract(keep(Manifold.union(cuts))));
+      if (cuts.length) {
+        const cut = keep(Manifold.union(cuts));
+        solid = keep(solid.subtract(cut));
+        if (lettering) lettering = keep(lettering.subtract(cut));
+      }
     }
 
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
@@ -311,6 +325,11 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       footprint = keep(Manifold.extrude(keep(CrossSection.square([W, D])), ztop + 10));   // pieces may overhang the edge
     }
     if (footprint) solid = keep(solid.intersect(footprint));
+    if (lettering && footprint) lettering = keep(lettering.intersect(footprint));
+    if (lettering?.isEmpty()) lettering = null;
+    // single-colour body: raised letters merged in (engraved ones are just the empty pocket)
+    const plain = solid;
+    if (lettering && label.style !== "engraved") solid = keep(solid.add(lettering));
     const status = solid.status();
     if (status !== "NoError" || solid.isEmpty()) throw new Error(`Mesh is not a valid solid (${status})`);
     const mesh = solid.getMesh();
@@ -361,8 +380,15 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       triangles += idx.length / 3;
     }
 
+    const plainMesh = (m) => {
+      const g = m.getMesh(), gp = g.numProp, gv = g.vertProperties, pos = new Float32Array((gv.length / gp) * 3);
+      for (let i = 0, k = 0; i < gv.length; i += gp, k += 3) { pos[k] = gv[i]; pos[k + 1] = gv[i + 1]; pos[k + 2] = gv[i + 2]; }
+      return { positions: pos, indices: mergedTris(g) };
+    };
     return {
       positions, indices, trail, inlays,
+      lettering: lettering && plainMesh(lettering),
+      plainTerrain: plain !== solid ? plainMesh(plain) : null,
       stats: {
         width: W, depth: D, height: ztop,
         scale: 1000 / sc, zExag: o.zExag, base: o.base,

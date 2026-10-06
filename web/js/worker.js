@@ -62,7 +62,8 @@ self.onmessage = async ({ data: { id, job = "build", segments, opts } }) => {
     progress("engine", 0);
     const wasm = await getManifold();
     const m = await buildModel(segments, opts, { getTile, manifold: wasm, progress });
-    const buffers = [m.positions, m.indices, m.trail, ...m.inlays.flatMap((q) => [q.positions, q.indices, q.trail])];
+    const buffers = [m.positions, m.indices, m.trail, ...m.inlays.flatMap((q) => [q.positions, q.indices, q.trail]),
+                     ...[m.lettering, m.plainTerrain].filter(Boolean).flatMap((q) => [q.positions, q.indices])];
     self.postMessage({ id, type: "done", model: m }, buffers.map((b) => b.buffer));
   } catch (err) {
     self.postMessage({ id, type: "error", message: err?.message ?? String(err) });

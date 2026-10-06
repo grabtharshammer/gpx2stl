@@ -186,6 +186,7 @@ async function run(name, { width, height, dark }) {
   await drag(".fp-label-handle", 30, -50);
   console.log(`${name}: after moving the label: ${await info()}`);
   await build("raised label");
+  if (await page.$eval("#download-3mf", (b) => b.hidden)) fail(`${name}: no 3MF option with a label`);
   await page.screenshot({ path: join(shots, `${name}-model-label.png`) });
   await click('#tabs [data-tab="map"]');
   await sleep(500);

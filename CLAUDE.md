@@ -60,6 +60,10 @@ Map dots snap via `routeIndex.nearest` (planar metres in the frame).
   spans the rotated bounding box and draws the plate rotated inside (`rotate(-angle)`, SVG is y-down).
 - Auto placement: summed-area table of route cells, nearest to bottom-centre without covering
   the route and inside the footprint.
+- Lettering is kept as its own body (`lettering`; engraved = pocket fill) and merged into the main
+  body only for the single-colour STL; `plainTerrain` is the terrain without raised letters. The
+  3MF (`threemf.js`) is ONE object with components (terrain, route pieces, lettering), so slicers
+  keep the parts aligned instead of dropping each onto the bed.
 - Without WebGL the app still works (no preview).
 
 ## Separate inlay (core/inlay.js)
