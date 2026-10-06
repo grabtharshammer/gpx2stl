@@ -1,67 +1,159 @@
 # gpx2stl
 
-Turn a GPX track into a 3D-printable terrain relief with the route marked on it.
-Everything runs in the browser: drop in a GPX file, trim it, choose the print area on a topo map, adjust
-the settings, preview the model in 3D and download a watertight STL. Your GPX file never leaves
-your computer.
+Turn a GPS track into a 3D-printable terrain model with your route on it.
 
-## Run it locally
+**Use it here: <https://grabtharshammer.github.io/gpx2stl/>**. Nothing to install, and it works on
+desktop and phone browsers. Everything runs in your browser; your GPX file is never uploaded anywhere.
 
-The app is a static site in `web/` with no build step. Serve it over `http://localhost`
-(opening `index.html` as a file won't work, because browsers block module workers on `file://`):
+![Map view: the route on a topo map with the print area and a label](docs/readme-map.jpg)
+![3D view: the finished terrain model with the route, start and finish markers, and the label](docs/readme-model.jpg)
 
-    cd web
-    python -m http.server 8000
+## What it does
 
-Then open <http://localhost:8000>.
+- Builds real terrain from public elevation data around your route, with the route raised,
+  carved in, or printed as a **separate inlay** in another colour.
+- **Print area on a topo map**: fit the route, or pick square, 3:2, hexagon or a custom box, and
+  drag/resize it on the map.
+- **Trim** the start and end of the track.
+- **Start and finish markers** in a choice of shapes, turned to face the direction of travel.
+- A **label plate** with your own text, prefilled with the route name, distance, climb, high point,
+  and the date and duration when the GPX has real timestamps. Raised or engraved, any angle.
+- Downloads: **STL** for single-colour printing, a **zip of parts** for printing the inlay
+  separately, and a **3MF** with every colour as its own part for AMS/MMU printers.
 
-Live at **<https://grabtharshammer.github.io/gpx2stl/>**. It is deployed from `web/` by GitHub Actions on every push to `main`
-(`.github/workflows/pages.yml`). Any other static host works too (Netlify, Cloudflare Pages…).
-It must be served over HTTPS (or localhost) so the elevation tile cache works.
+## How to use it
+
+1. **Load a route.** Drop a `.gpx` file on the page (from Strava, Garmin, Komoot, Trailforks, …)
+   or try the Whole Enchilada example. Tracks, routes and multi-segment files all work; GPX
+   elevations are ignored, since the terrain data is more consistent.
+2. **Trim it** if you like: the *Start at* / *Finish at* sliders, or drag the green and red dots
+   along the route on the map.
+3. **Choose the print area** on the **Map** tab. *Fit route* takes the route plus the
+   *Terrain around route* margin; *Square*, *3:2* and *Hexagon* keep their shape; dragging a corner
+   in *Fit route* switches to *Custom*. The label under the map shows the area in km and the print
+   size in mm, and warns if part of the route falls outside.
+4. **Set up the model**: size, vertical exaggeration, detail, trail style, markers and label
+   (see [Settings](#settings)). The line above the button estimates size, scale, triangle count
+   and file size before you build.
+5. **Generate model.** The first build downloads elevation tiles (cached for next time). The
+   **3D model** tab shows the result: drag to rotate, scroll to zoom. Change anything afterwards and
+   the button becomes **Update model**.
+6. **Download** (see [Downloads and printing](#downloads-and-printing)).
+
+Your settings are remembered in this browser; the route, trim and label text are not.
 
 ## Settings
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Start at / Finish at | whole route | Trim the track: use the sliders, or drag the green/red dots along the route on the map |
-| Shape | Fit route | Fit route, Square, 3:2, Hexagon, or Custom. Drag the shape on the map to move it, drag its corners to resize (Square, 3:2 and Hexagon keep their proportions). Hexagon fits itself tightly around the route and picks flat- or pointy-top, whichever is smaller |
-| Size | 180 mm | Longest side of the model |
+| **Route** | | |
+| Start at / Finish at | whole route | Trim the track; or drag the green/red dots on the map |
+| **Print area** | | |
+| Shape | Fit route | Fit route, Square, 3:2, Hexagon or Custom. Drag the shape (or its centre handle) to move it, its corners to resize. Hexagon wraps itself tightly round the route and picks flat- or pointy-top, whichever is smaller |
+| Terrain around route | 1.8 km | Margin around the track; changing it resets an area edited on the map |
+| **Model** | | |
+| Size | 180 mm | Longest side of the print |
 | Vertical exaggeration | 2× | Makes hills taller than real life |
-| Terrain around route | 1.8 km | Margin around the track; resets any area edited on the map |
-| Detail | Standard (0.3 mm grid) | Draft 0.5 mm, Fine 0.2 mm. Finer = bigger file |
-| Trail style | Raised | Raised ridge, carved groove, or **separate inlay**: the route prints as its own piece(s) in another colour and drops into a slot in the terrain. Each piece has a flat, sloped bottom (a best-fit plane), so it prints without supports; the route is split only where a piece would get taller than "Tallest piece". Download as a zip (terrain + numbered pieces laid flat) or a 3MF for multi-colour printers; a test-fit piece checks the clearance first |
-| Inlay clearance, slot depth, tallest piece | 0.15 mm, 3 mm, 10 mm | The base is raised (to about 5.7 mm) to make room for the slot |
-| Trail height/depth, width | 1.0 mm, 1.6 mm | |
-| Start / finish marker | Triangle / Square | None, Triangle, Circle, Square, Star or Hexagon; raised solids that face the direction of travel (the triangle points the way) |
+| Detail | Standard | Draft (0.5 mm grid), Standard (0.3 mm), Fine (0.2 mm). Finer means bigger files |
+| **Trail** | | |
+| Style | Raised | *Raised* ridge, carved *Groove*, or separate *Inlay* (below) |
+| Height / depth, width | 1.0 mm, 1.6 mm | For an inlay, height is how far it stands proud of the terrain; 2 mm width is sturdier |
+| Inlay clearance | 0.15 mm | Gap per side between inlay and slot. Use *Download a test-fit piece* to check it on your printer |
+| Inlay slot depth | 3 mm | How far the inlay sinks into the terrain, at least |
+| Inlay tallest piece | 10 mm | The route is split into pieces only where one would get taller than this |
+| **Start & finish** | | |
+| Start / finish marker | Triangle / Square | None, Triangle, Circle, Square, Star or Hexagon; the triangle points the way you rode |
 | Marker size, height | 6 mm, 2 mm | Height is above the highest ground under the marker |
-| Label | off | Text printed on a flat plate (top level with the highest ground under it), raised or engraved. Prefilled with the route name, distance, climb/descent, high point, and date/duration when the GPX has timestamps; edit freely. Drag it on the map; by default it sits low and central, clear of the route |
-| Title size, text size, alignment | 6 mm, 4 mm, centre | Capital-letter heights for the first line and the rest; at least 2.5 mm (strokes are 0.23x the letter height, so 0.57 mm). Text that would make the label too big for the print is scaled down to fit, with a note |
-| Lettering depth | 0.8 mm | With a label (or an inlay) there's also a **3MF for multi-colour printers**: one object whose parts are the terrain, the route pieces, the start and finish markers, and the lettering (raised letters, or a flush fill for engraved ones), so each can get its own filament. The parts don't overlap |
-| Label rotation | 0° | Slider, or drag the rotate handle above the label on the map (snaps to 15° steps when close) |
-| Base thickness | 3 mm | Under the lowest point |
-| Corner radius | 10 mm | 0 for square corners |
-| Terrain smoothing | 0.8 | Blur in grid cells |
+| **Label** | off | |
+| Text | from the GPX | Edit freely; *Fill in from the GPX* restores the stats. Follows trimming and the units until you type |
+| Units | mi · ft in the US, else km · m | For the prefilled stats |
+| Lettering | Raised | Or engraved into the plate |
+| Alignment | Centre | Left, centre or right |
+| Title size, text size | 6 mm, 4 mm | Capital-letter height of the first line and of the rest; at least 2.5 mm so strokes stay printable. Text too big for the print is scaled down to fit, with a note |
+| Lettering depth | 0.8 mm | How far letters stand up, or are cut in |
+| Rotation | 0° | Or drag the rotate handle above the label on the map (snaps to 15° steps when close) |
+| Placement | automatic | Low and central, clear of the route; drag it on the map. The map warns if it covers the route or hangs off the print |
+| **Advanced** | | |
+| Base thickness | 3 mm | Under the lowest point (raised automatically to fit an inlay's slot) |
+| Corner radius | 10 mm | 0 for square corners; also rounds the hexagon |
+| Terrain smoothing | 0.8 | Softens noisy elevation data |
 
-## Layout
+## Downloads and printing
 
-    web/                 the app (static site)
-      js/core/           engine: GPX parsing, PNG/tile decoding, filters, footprint shapes, markers, label text,
-                         elevation profile, inlay pieces, model builder, STL / ZIP / 3MF writers
-      js/worker.js       runs the engine in a Web Worker; loads manifold-3d (WASM) from jsDelivr
-      js/app.js          UI, print-area state and three.js preview
-      js/mapview.js      Leaflet map: route + draggable/resizable print footprint
-    tests/               Node regression test + headless-browser smoke test
-    python/              original Python CLI, kept as the reference implementation
+- **Download STL**: the whole model as one body, for single-colour printing.
+- **Download parts (.zip)** (inlay style): `terrain.stl` plus `inlay-1-of-N.stl`, … numbered from
+  start to finish. The inlay pieces are already turned to lie on their flat, sloped bottoms, so
+  they print without supports. Print the terrain in one colour and the pieces in another, then press
+  each piece into its slot (a drop of glue if the fit is loose). Print the test-fit piece first to
+  tune *Clearance*.
+- **3MF for multi-colour printers** (shown with an inlay or a label): one object whose parts are
+  the terrain, route pieces, start and finish markers, and label lettering, in their assembled
+  positions and without overlaps. In the slicer, assign a filament to each part.
+  Bambu Studio says *"The 3mf file has invalid config, load geometry data only"* for any 3MF it
+  didn't save itself; that's expected ([BambuStudio#11927](https://github.com/bambulab/BambuStudio/issues/11927)),
+  and the model loads fine.
 
-## Tests
+Print tips (OrcaSlicer / Bambu Studio): 0.08–0.12 mm layers, "Ensure vertical shell thickness:
+All", ~1 mm top shell, 3 walls, 10–15% gyroid, no supports. Rounded corners and a mouse-ear brim
+help against lifting.
+
+## Limits
+
+- One model can use up to 400 elevation tiles; for very large areas pick a coarser *Detail* or a
+  smaller area. The estimate line warns before you build.
+- Elevation detail is limited by the source data: roughly 10–30 m in the US, coarser in some
+  other places (AWS Terrain Tiles). *Fine* only helps where the print is small enough to show it.
+- Out-and-back sections and self-crossings merge into one ridge.
+- A label placed over the route covers it (and with an inlay, the slot cuts through the label);
+  the map warns about this.
+- Without WebGL, the 3D preview is unavailable but building and downloading still work.
+
+## Development
+
+The app is a static site in `web/` with no build step: plain ES modules, with three.js, Leaflet,
+opentype.js and manifold-3d (WASM) loaded from jsDelivr at pinned versions. Serve it over
+`http://localhost` (module workers don't run from `file://`):
+
+    cd web
+    python -m http.server 8000
+
+then open <http://localhost:8000>. Every push to `main` that touches `web/` deploys it to GitHub
+Pages (`.github/workflows/pages.yml`); any static HTTPS host works (the tile cache needs a secure
+context).
+
+    web/
+      index.html, css/   page and styles
+      js/app.js          UI state, print area, label, trimming, downloads, three.js preview
+      js/mapview.js      Leaflet map: route, trim dots, print footprint, label placement
+      js/worker.js       runs builds, elevation profiles and test-fit pieces in a Web Worker
+      js/core/           engine: GPX parsing, tile/PNG decoding, filters, footprints, markers,
+                         label text, elevation profile, inlay pieces, model builder,
+                         STL / ZIP / 3MF writers
+      fonts/             Atkinson Hyperlegible Bold (OFL)
+      examples/          sample GPX
+    tests/               regression + headless-browser tests
+    python/              the original Python CLI, kept as the reference implementation
+    docs/                README screenshots
+
+### Tests
+
+Node 20+ and a Chromium install:
 
     cd tests
     npm install
-    node regression.mjs                    # engine vs. the Python reference numbers
-    (puppeteer-core is a dev dependency; it uses your own Chromium)
-    node browser.mjs /path/to/chromium     # full UI flow in headless Chromium
+    node regression.mjs [tile_cache_dir]       # engine checks
+    node browser.mjs /path/to/chromium [dir]   # full UI flow, screenshots to [dir]
+    BASE_URL=https://grabtharshammer.github.io/gpx2stl/ node browser.mjs /path/to/chromium   # test the live site
 
-## Python CLI (reference)
+`regression.mjs` checks that the default model still matches the Python reference exactly, plus
+hexagon cuts, markers, trimming, labels and the elevation profile, inlay fit (no overlap with the
+terrain, pieces lie flat), and that the 3MF parts don't overlap and add up to the model. Tiles
+are read from the cache directory or downloaded. `browser.mjs` drives the whole UI at desktop and
+phone sizes, including every download.
+
+### Python CLI (reference)
+
+The original single-file script, without the newer features:
 
     cd python
     python -m venv .venv && .venv/bin/pip install -r requirements.txt   # .venv\Scripts\ on Windows
@@ -69,8 +161,9 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 
 ## Credits
 
-Elevation: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (terrarium PNGs; SRTM,
-USGS 3DEP, GMTED and others), about 30 m resolution in the US at zoom 12.
-Map: [OpenTopoMap](https://opentopomap.org) (© OpenStreetMap contributors, SRTM) via [Leaflet](https://leafletjs.com).
-Geometry: [manifold-3d](https://github.com/elalish/manifold). Preview: [three.js](https://threejs.org).
-Label font: [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) Bold (SIL OFL, `web/fonts/OFL.txt`), read with [opentype.js](https://opentype.js.org).
+Elevation: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (SRTM, USGS 3DEP,
+GMTED and others). Map: [OpenTopoMap](https://opentopomap.org) (© OpenStreetMap contributors, SRTM)
+via [Leaflet](https://leafletjs.com). Geometry: [manifold-3d](https://github.com/elalish/manifold).
+Preview: [three.js](https://threejs.org). Label font:
+[Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) Bold (SIL OFL, `web/fonts/OFL.txt`),
+read with [opentype.js](https://opentype.js.org).
