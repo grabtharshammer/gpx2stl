@@ -184,3 +184,6 @@ path.fp-route-full { stroke: #e8590c; stroke-opacity: .35; stroke-dasharray: 2 6
 .fp-label-svg path { fill: #1f2937; }
 .fp-label-handle { border-radius: 50%; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f2937' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v18M3 12h18M12 3l-3 3m3-3 3 3M12 21l-3-3m3 3 3-3M3 12l3-3m-3 3 3 3M21 12l-3-3m3 3-3 3'/%3E%3C/svg%3E") center / 14px no-repeat; border: 2px solid #1f2937; box-shadow: 0 1px 3px rgb(0 0 0 / .35); cursor: move; }
 .no-gl { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: var(--muted); padding: 16px; }
+.fp-label-svg { pointer-events: none !important; }
+.fp-label-svg rect, .fp-label-svg path { pointer-events: auto; }
+.fp-rotate-handle { border-radius: 50%; border: 2px solid #1f2937; box-shadow: 0 1px 3px rgb(0 0 0 / .35); cursor: grab; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f2937' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4'/%3E%3C/svg%3E") center / 13px no-repeat; }

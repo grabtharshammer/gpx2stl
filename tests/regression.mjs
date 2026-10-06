@@ -117,15 +117,15 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
   const font = opentype.parse(fb.buffer.slice(fb.byteOffset, fb.byteOffset + fb.length));
   const t = layoutText(font, "the WHOLE enchilada\n29.4 mi · +1,520 / -7,780 ft", 4);
   const f = routeFrame(gpx.segments), [lat, lon] = f.toLL(0, -6000);
-  for (const style of ["raised", "engraved"]) {
-    const label = { center: { lat, lon }, contours: t.contours, width: t.width + 6, height: t.height + 6, style, relief: 0.8 };
+  for (const [style, angle] of [["raised", 0], ["engraved", 0], ["raised", 30]]) {
+    const label = { center: { lat, lon }, contours: t.contours, width: t.width + 6, height: t.height + 6, style, relief: 0.8, angle };
     const lm = await buildModel(gpx.segments, { label }, { getTile, manifold: wasm });
     const count = [0, 0, 0, 0, 0, 0];
     for (const k of lm.trail) count[k]++;
-    console.log(`label ${style}: ${t.width.toFixed(1)} x ${t.height.toFixed(1)} mm text, ${t.contours.length} contours; ` +
+    console.log(`label ${style} ${angle}°: ${t.width.toFixed(1)} x ${t.height.toFixed(1)} mm text, ${t.contours.length} contours; ` +
                 `plate ${count[4]} / lettering ${count[5]} vertices; ${lm.stats.triangles.toLocaleString("en")} triangles`);
     if (!count[4] || !count[5]) { bad++; console.log(`MISMATCH label ${style} missing parts`); }
-    if (out) await writeFile(out.replace(/[.]stl$/, `-label-${style}.stl`), Buffer.from(writeStl(lm.positions, lm.indices, "label")));
+    if (out) await writeFile(out.replace(/[.]stl$/, `-label-${style}-${angle}.stl`), Buffer.from(writeStl(lm.positions, lm.indices, "label")));
   }
   const prof = await routeProfile(gpx.segments, getTile);
   console.log(`profile: high ${prof.max.toFixed(0)} m, low ${prof.min.toFixed(0)} m, +${prof.gain.toFixed(0)} / -${prof.loss.toFixed(0)} m; times ${JSON.stringify(routeTimes(gpx.segments))}`);

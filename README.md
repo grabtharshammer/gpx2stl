@@ -35,6 +35,7 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 | Marker size, height | 6 mm, 2 mm | Height is above the highest ground under the marker |
 | Label | off | Text printed on a flat plate (top level with the highest ground under it), raised or engraved. Prefilled with the route name, distance, climb/descent, high point, and date/duration when the GPX has timestamps; edit freely. Drag it on the map; by default it sits low and central, clear of the route |
 | Letter height, lettering depth | 4 mm, 0.8 mm | |
+| Label rotation | 0° | Slider, or drag the rotate handle above the label on the map (snaps to 15° steps when close) |
 | Base thickness | 3 mm | Under the lowest point |
 | Corner radius | 10 mm | 0 for square corners |
 | Terrain smoothing | 0.8 | Blur in grid cells |

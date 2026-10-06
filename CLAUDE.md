@@ -55,6 +55,9 @@ Map dots snap via `routeIndex.nearest` (planar metres in the frame).
   30 m resampling, 3 m hysteresis) run in a separate worker job ("profile") so builds don't
   cancel it. GPX points are [lat, lon, time, ele] (NaN when missing; pre-1990 times ignored).
   Leaflet rejects 4-element points: mapview converts with `ll()`.
+- Rotation: `label.angle` degrees CCW. Engine rotates plate + text CrossSections and tests terrain
+  cells / vertex colours in the plate's own frame. The map's SVG overlay is axis-aligned, so it
+  spans the rotated bounding box and draws the plate rotated inside (`rotate(-angle)`, SVG is y-down).
 - Auto placement: summed-area table of route cells, nearest to bottom-centre without covering
   the route and inside the footprint.
 - Without WebGL the app still works (no preview).

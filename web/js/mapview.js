@@ -22,8 +22,10 @@ export class FootprintMap {
    * onTrim(end, lat, lon, final) — a start/finish dot was dragged; end is "start" or "end".
    *   Returns the [lat, lon] the dot should snap to.
    * onLabelMove(x, y, final) — the label was dragged to centre (x, y), frame metres.
+   * onLabelRotate(degrees, final) — the label's rotate handle was dragged.
    */
-  constructor(el, { onChange, onTrim, onLabelMove }) {
+  constructor(el, { onChange, onTrim, onLabelMove, onLabelRotate }) {
+    this.onLabelRotate = onLabelRotate;
     this.onChange = onChange;
     this.onTrim = onTrim;
     this.onLabelMove = onLabelMove;
@@ -75,9 +77,28 @@ export class FootprintMap {
       icon: L.divIcon({ className: "fp-label-handle", iconSize: [22, 22] }),
     });
     this.labelHandle.on("drag", () => {
+      // the handle sits at the plate's top-left corner; move the centre with it
       const { lat, lng } = this.labelHandle.getLatLng(), [x, y] = this.frame.toM([lat, lng]);
-      this.#moveLabel(x + this.label.wM / 2, y - this.label.hM / 2, false);
+      const [dx, dy] = this.#labelOffset(-this.label.wM / 2, this.label.hM / 2);
+      this.#moveLabel(x - dx, y - dy, false);
     });
+    this.rotateHandle = L.marker([0, 0], {
+      draggable: true, keyboard: false, zIndexOffset: 900, title: "Drag to rotate the label",
+      icon: L.divIcon({ className: "fp-rotate-handle", iconSize: [20, 20] }),
+    });
+    const rotate = (final) => {
+      const { lat, lng } = this.rotateHandle.getLatLng(), [x, y] = this.frame.toM([lat, lng]);
+      let deg = (Math.atan2(y - this.label.y, x - this.label.x) * 180) / Math.PI - 90;   // handle points "up" the label
+      deg = ((Math.round(deg) + 540) % 360) - 180;
+      const snap = Math.round(deg / 15) * 15;
+      if (Math.abs(deg - snap) <= 3) deg = snap;
+      this.label.angle = deg;
+      this.#drawLabel();
+      this.onLabelRotate(deg, final);
+    };
+    this.rotateHandle.on("dragstart", () => (this.rotating = true));
+    this.rotateHandle.on("drag", () => rotate(false));
+    this.rotateHandle.on("dragend", () => { this.rotating = false; rotate(true); });
     this.labelHandle.on("dragend", () => this.#moveLabel(this.label.x, this.label.y, true));
     let grab = null;
     this.labelOverlay.on("mousedown", (e) => {
@@ -108,20 +129,48 @@ export class FootprintMap {
     if (!label) {
       this.labelOverlay.remove();
       this.labelHandle.remove();
+      this.rotateHandle.remove();
       return;
     }
-    const { w, h, path } = label;
-    this.labelSvg.setAttribute("viewBox", `${-w / 2} ${-h / 2} ${w} ${h}`);
-    this.labelSvg.innerHTML = `<rect x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" rx="${Math.min(1.5, w / 4, h / 4)}"/><path d="${path}"/>`;
-    this.#placeLabel();
+    this.#drawLabel();
     this.labelOverlay.addTo(this.map);
     this.labelHandle.addTo(this.map);
+    this.rotateHandle.addTo(this.map);
+  }
+
+  /** (u, v) in the label's own frame (metres) -> offset from its centre on the map. */
+  #labelOffset(u, v) {
+    const a = ((this.label.angle ?? 0) * Math.PI) / 180;
+    return [u * Math.cos(a) - v * Math.sin(a), u * Math.sin(a) + v * Math.cos(a)];
+  }
+
+  // The SVG overlay is axis-aligned, so it covers the rotated plate's bounding box and the plate
+  // is drawn rotated inside it (SVG is y-down, hence the negative angle).
+  #drawLabel() {
+    const { w, h, wM, hM, path, angle = 0 } = this.label, a = (angle * Math.PI) / 180;
+    const bw = Math.abs(w * Math.cos(a)) + Math.abs(h * Math.sin(a)), bh = Math.abs(w * Math.sin(a)) + Math.abs(h * Math.cos(a));
+    this.labelSvg.setAttribute("viewBox", `${-bw / 2} ${-bh / 2} ${bw} ${bh}`);
+    this.labelSvg.innerHTML = `<g transform="rotate(${-angle})"><rect x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" ` +
+      `rx="${Math.min(1.5, w / 4, h / 4)}"/><path d="${path}"/></g>`;
+    this.label.bwM = (bw / w) * wM;
+    this.label.bhM = (bh / h) * hM;
+    this.#placeLabel();
   }
 
   #placeLabel() {
-    const { x, y, wM, hM } = this.label, f = this.frame;
-    this.labelOverlay.setBounds([f.toLL(x - wM / 2, y - hM / 2), f.toLL(x + wM / 2, y + hM / 2)]);
-    this.labelHandle.setLatLng(f.toLL(x - wM / 2, y + hM / 2));   // top-left corner
+    const { x, y, wM, hM, bwM, bhM } = this.label, f = this.frame;
+    this.labelOverlay.setBounds([f.toLL(x - bwM / 2, y - bhM / 2), f.toLL(x + bwM / 2, y + bhM / 2)]);
+    const [hx, hy] = this.#labelOffset(-wM / 2, hM / 2);                    // top-left corner
+    this.labelHandle.setLatLng(f.toLL(x + hx, y + hy));
+    if (!this.rotating) {
+      const [rx, ry] = this.#labelOffset(0, hM / 2 + Math.max(hM * 0.35, 18 * this.#metresPerPixel()));
+      this.rotateHandle.setLatLng(f.toLL(x + rx, y + ry));                  // above the top edge
+    }
+  }
+
+  #metresPerPixel() {
+    const c = this.map.getCenter(), p = this.map.latLngToContainerPoint(c);
+    return this.map.distance(c, this.map.containerPointToLatLng([p.x + 100, p.y])) / 100;
   }
 
   #moveLabel(x, y, final) {

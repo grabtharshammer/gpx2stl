@@ -32,6 +32,7 @@ const SLIDERS = {
   "label-controls": [
     { key: "labelSize", label: "Letter height", unit: "mm", min: 2, max: 12, step: 0.5, help: "Height of capital letters" },
     { key: "labelRelief", label: "Lettering depth", unit: "mm", min: 0.4, max: 2, step: 0.1, help: "How far letters stand up, or are cut in" },
+    { key: "labelAngle", label: "Rotation", unit: "°", min: -180, max: 180, step: 1, help: "Or drag the rotate handle above the label on the map" },
   ],
   "advanced-controls": [
     { key: "base", label: "Base thickness", unit: "mm", min: 1, max: 15, step: 0.5, help: "Under the lowest point" },
@@ -44,7 +45,7 @@ const UI_DEFAULTS = {
   trailStyle: "raised", trailDepth: Math.abs(DEFAULTS.trailHeight), trailWidth: DEFAULTS.trailWidth,
   base: DEFAULTS.base, cornerRadius: DEFAULTS.cornerRadius, smooth: DEFAULTS.smooth,
   startMarker: "triangle", endMarker: "square", markerSize: DEFAULTS.markerSize, markerHeight: DEFAULTS.markerHeight,
-  labelOn: false, labelStyle: "raised", labelSize: 4, labelRelief: 0.8,
+  labelOn: false, labelStyle: "raised", labelSize: 4, labelRelief: 0.8, labelAngle: 0,
   labelUnits: /^en-(US|LR|MM)$/i.test(navigator.language) ? "imperial" : "metric",
 };
 
@@ -85,7 +86,7 @@ for (const [container, defs] of Object.entries(SLIDERS)) {
       changed();
     };
     range.addEventListener("input", () => set(range.value, range));
-    num.addEventListener("change", () => set(Math.min(d.max * 4, Math.max(0, num.value)), num));
+    num.addEventListener("change", () => set(Math.min(d.max * 4, Math.max(Math.min(0, d.min), num.value)), num));
     inputs[d.key] = (v) => { num.value = v; range.value = v; };
     $(container).append(el);
   }
@@ -178,7 +179,7 @@ function labelEngineOpts() {
   if (!L || !labelCenter || !frame) return null;
   const [lat, lon] = frame.toLL(labelCenter.x, labelCenter.y);
   return { center: { lat, lon }, contours: L.contours, width: L.w, height: L.h,
-           style: settings.labelStyle, relief: settings.labelRelief };
+           style: settings.labelStyle, relief: settings.labelRelief, angle: settings.labelAngle };
 }
 
 const num = (v, digits = 0) => v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -275,14 +276,19 @@ function placeLabel(p, a, poly, skipMap) {
   const L = labelPlate();
   if (!L) { labelCenter = null; fpMap.setLabel(null); return []; }
   const wM = L.w / p.sc, hM = L.h / p.sc, inset = 3 / p.sc;
-  const fits = (x, y, pad) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([sx, sy]) =>
-    insidePolygon(poly, x + sx * (wM / 2 + pad) - a.x0, y + sy * (hM / 2 + pad) - a.y0));
-  const c = labelPos ?? autoLabelSpot(a, wM, hM, inset, 2 / p.sc, (x, y) => fits(x, y, inset));
+  const ang = (settings.labelAngle * Math.PI) / 180, ca = Math.cos(ang), sa = Math.sin(ang);
+  const bwM = Math.abs(wM * ca) + Math.abs(hM * sa), bhM = Math.abs(wM * sa) + Math.abs(hM * ca);   // rotated bounds
+  const fits = (x, y, pad) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([sx, sy]) => {
+    const u = sx * (wM / 2 + pad), v = sy * (hM / 2 + pad);
+    return insidePolygon(poly, x + u * ca - v * sa - a.x0, y + u * sa + v * ca - a.y0);
+  });
+  const c = labelPos ?? autoLabelSpot(a, bwM, bhM, inset, 2 / p.sc, (x, y) => fits(x, y, inset));
   labelCenter = c;
-  if (!skipMap) fpMap.setLabel({ x: c.x, y: c.y, wM, hM, w: L.w, h: L.h, path: L.path });
+  if (!skipMap) fpMap.setLabel({ x: c.x, y: c.y, wM, hM, w: L.w, h: L.h, path: L.path, angle: settings.labelAngle });
   const warn = [];
   if (!fits(c.x, c.y, 0)) warn.push("The label hangs off the print");
-  if (routePts.some(([x, y]) => Math.abs(x - c.x) < wM / 2 && Math.abs(y - c.y) < hM / 2)) warn.push("The label covers part of the route");
+  const under = ([x, y]) => Math.abs((x - c.x) * ca + (y - c.y) * sa) < wM / 2 && Math.abs(-(x - c.x) * sa + (y - c.y) * ca) < hM / 2;
+  if (routePts.some(under)) warn.push("The label covers part of the route");
   return warn;
 }
 
@@ -370,6 +376,11 @@ const fpMap = new FootprintMap($("map"), {
   },
   onLabelMove(x, y, final) {
     labelPos = { x, y };
+    changed({ fromMap: true, labelDrag: !final });
+  },
+  onLabelRotate(angle, final) {
+    settings.labelAngle = angle;
+    inputs.labelAngle(angle);
     changed({ fromMap: true, labelDrag: !final });
   },
   onTrim(end, lat, lon) {

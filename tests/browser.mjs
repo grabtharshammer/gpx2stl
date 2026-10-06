@@ -187,6 +187,15 @@ async function run(name, { width, height, dark }) {
   console.log(`${name}: after moving the label: ${await info()}`);
   await build("raised label");
   await page.screenshot({ path: join(shots, `${name}-model-label.png`) });
+  await click('#tabs [data-tab="map"]');
+  await sleep(500);
+  await drag(".fp-rotate-handle", -60, 25);
+  const angle = await page.$eval("#r-labelAngle", (r) => +r.value);
+  console.log(`${name}: label rotated to ${angle}°`);
+  if (!angle) fail(`${name}: dragging the rotate handle didn't rotate the label`);
+  await page.screenshot({ path: join(shots, `${name}-map-label-rotated.png`) });
+  await build("rotated label");
+  await page.screenshot({ path: join(shots, `${name}-model-label-rotated.png`) });
   await click('#label-style [data-v="engraved"]');
   await build("engraved label");
   await page.screenshot({ path: join(shots, `${name}-model-label-engraved.png`) });
