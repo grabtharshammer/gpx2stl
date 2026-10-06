@@ -58,11 +58,19 @@ export async function routeProfile(segments, getTile, zoom = 12) {
   return { max, min, gain, loss };
 }
 
-/** First/last timestamps (ms) on the route, or null. */
+const MAX_SPEED = 80 / 3.6;   // m/s; faster than this on average means the times aren't a real ride
+
+/**
+ * First/last timestamps (ms) on the route, or null. Course files often carry made-up times
+ * (e.g. one second per point), which would print a nonsense date and duration, so those are
+ * rejected by their implied average speed.
+ */
 export function routeTimes(segments) {
-  let start = null, end = null;
-  for (const s of segments) for (const p of s) {
-    if (Number.isFinite(p[2])) { start ??= p[2]; end = p[2]; }
+  let start = null, end = null, dist = 0;
+  for (const s of segments) for (let i = 0; i < s.length; i++) {
+    if (i) dist += haversine(s[i - 1], s[i]);
+    if (Number.isFinite(s[i][2])) { start ??= s[i][2]; end = s[i][2]; }
   }
-  return start != null && end > start ? { start, end } : null;
+  if (start == null || !(end > start)) return null;
+  return dist / ((end - start) / 1000) > MAX_SPEED ? null : { start, end };
 }
