@@ -1,5 +1,5 @@
 // Build the example route with the browser engine under Node and compare against the
-// reference numbers from the Python implementation (see CLAUDE.md).
+// reference model's numbers (see CLAUDE.md), plus checks for every other feature.
 //   cd tests && npm install && node regression.mjs [tile_cache_dir] [out.stl]
 // Tiles are read from tile_cache_dir if present there, otherwise downloaded (and saved).
 import { readFile, writeFile, mkdir } from "node:fs/promises";
@@ -61,7 +61,7 @@ console.log(`  elevation   ${s.elevMin.toFixed(0)} - ${s.elevMax.toFixed(0)} m  
 console.log(`  triangles   ${s.triangles.toLocaleString("en")}   volume ${s.volume.toFixed(1)} cm3`);
 if (out) await writeFile(out, Buffer.from(writeStl(m.positions, m.indices, gpx.name)));
 
-// Python reference: 180.0 x 111.9 x 32.2 mm, 1:173,067, 1208-3733 m, z12, 452,004 tris, 255 cm3
+// Reference model: 180.0 x 111.9 x 32.2 mm, 1:173,067, 1208-3733 m, z12, 452,004 tris, 255 cm3
 const expect = [
   ["width", s.width, 180.0, 0.05], ["depth", s.depth, 111.9, 0.05], ["height", s.height, 32.2, 0.05],
   ["scale", s.scale, 173067, 1], ["elevMin", s.elevMin, 1208, 0.5], ["elevMax", s.elevMax, 3733, 0.5],
@@ -70,7 +70,7 @@ const expect = [
 let bad = 0;
 for (const [k, got, want, tol] of expect)
   if (Math.abs(got - want) > tol) { bad++; console.log(`MISMATCH ${k}: got ${got}, want ${want} ±${tol}`); }
-console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
+console.log(bad ? `${bad} mismatches` : "OK: matches the reference model");
 
 // Hexagon footprint: fitted the way the UI does it; every vertex must lie inside the hexagon
 // and the outline must reach the box edges (i.e. it really is the hexagon, not the box).

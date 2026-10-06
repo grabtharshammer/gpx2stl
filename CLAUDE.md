@@ -3,8 +3,9 @@
 Browser app that converts a GPX track into a watertight STL: real terrain relief with the route
 raised (or grooved) on the surface. Static site in `web/`, no build step, no server; plain ES
 modules, with three.js and manifold-3d (WASM) loaded from jsDelivr at pinned versions. The goal is
-something shareable that anyone can use from a link. `python/gpx2stl.py` is the original CLI, kept
-as the reference implementation.
+something shareable that anyone can use from a link. It began as a Python CLI (removed; it's in
+git history before the "Remove the Python reference script" commit), which the engine was ported
+from and whose output fixed the reference numbers below.
 
 ## How it works (web/js/core/)
 1. `gpx.js` — regex parser (no DOMParser, so it runs in workers and Node). lat/lon only, per
@@ -23,8 +24,8 @@ as the reference implementation.
 - `routeFrame` (core/model.js) is the local metre frame; the UI keeps areas as {x0,x1,y0,y1} metres
   in it and passes `opts.area = {south, west, north, east}` to the engine. Because x depends only on
   lon and y only on lat, that box maps exactly to a rectangle.
-- Shape "fit" with no map edit passes NO area, so the engine uses route + margin exactly like the
-  Python CLI (this is what keeps the regression identical). Square / 3:2 expand the fit box to that
+- Shape "fit" with no map edit passes NO area, so the engine uses route + margin exactly as the
+  reference model was made (this is what keeps the regression identical). Square / 3:2 expand the fit box to that
   ratio (landscape/portrait follows the route). Dragging in Fit switches to Custom; Square / 3:2 keep
   their ratio while resizing. Margin changes and shape clicks discard map edits.
 - Hexagon: `opts.shape = "hex"` cuts a hexagon inscribed in the area box (flat top if wider than
@@ -98,8 +99,8 @@ the preview colours). With both markers off the model is still byte-identical to
 
 ## Reference output / regression
 Defaults on `web/examples/whole_enchilada.gpx`: 180.0 x 111.9 x 32.2 mm, 1:173,067, elevation
-1208–3733 m, zoom 12, 452,004 triangles, 255 cm3. The JS engine matches the Python output exactly
-(every top-surface vertex, max |dz| = 0). `tests/regression.mjs` checks this; `tests/browser.mjs`
+1208–3733 m, zoom 12, 452,004 triangles, 255 cm3. These came from the original Python script,
+which the JS engine matched exactly (every top-surface vertex, max |dz| = 0). `tests/regression.mjs` checks this; `tests/browser.mjs`
 drives the full UI in headless Chromium (mythpi1 has `/usr/bin/chromium`; this PC has no Node).
 
 ## Known gaps

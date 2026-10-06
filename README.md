@@ -132,7 +132,6 @@ context).
       fonts/             Atkinson Hyperlegible Bold (OFL)
       examples/          sample GPX
     tests/               regression + headless-browser tests
-    python/              the original Python CLI, kept as the reference implementation
     docs/                README screenshots
 
 ### Tests
@@ -145,19 +144,11 @@ Node 20+ and a Chromium install:
     node browser.mjs /path/to/chromium [dir]   # full UI flow, screenshots to [dir]
     BASE_URL=https://grabtharshammer.github.io/gpx2stl/ node browser.mjs /path/to/chromium   # test the live site
 
-`regression.mjs` checks that the default model still matches the Python reference exactly, plus
+`regression.mjs` checks that the default model still matches the reference model exactly, plus
 hexagon cuts, markers, trimming, labels and the elevation profile, inlay fit (no overlap with the
 terrain, pieces lie flat), and that the 3MF parts don't overlap and add up to the model. Tiles
 are read from the cache directory or downloaded. `browser.mjs` drives the whole UI at desktop and
 phone sizes, including every download.
-
-### Python CLI (reference)
-
-The original single-file script, without the newer features:
-
-    cd python
-    python -m venv .venv && .venv/bin/pip install -r requirements.txt   # .venv\Scripts\ on Windows
-    python gpx2stl.py ../web/examples/whole_enchilada.gpx -o out.stl --preview out.png
 
 ## Credits
 

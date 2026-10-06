@@ -1,4 +1,5 @@
-// Grid filters matching the scipy.ndimage calls in the Python reference.
+// Grid filters equivalent to scipy.ndimage gaussian_filter / distance_transform_edt (the original
+// Python version used those, and the reference model depends on matching them exactly).
 
 /** In-place separable Gaussian blur (scipy gaussian_filter: truncate=4, mode='reflect'). */
 export function gaussianBlur(a, nx, ny, sigma) {

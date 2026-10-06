@@ -1,5 +1,5 @@
 // GPX segments -> watertight terrain solid with the route raised (or grooved) on it.
-// Port of the original Python gpx2stl.build(); keep the two in step (see tests/).
+// Grew out of a Python script; the default output must keep matching its reference model (tests/).
 import { TILE, lonLatToTile } from "./tiles.js";
 import { gaussianBlur, distanceTransform } from "./filters.js";
 import { outline } from "./footprint.js";

@@ -416,7 +416,7 @@ function currentArea() {
   return { x0, x1, y0, y1 };
 }
 
-/** Area for the engine; undefined keeps its own route + margin box (identical to the Python CLI). */
+/** Area for the engine; undefined keeps its own route + margin box (identical to the reference model). */
 function engineArea() {
   if (!frame || (!override && settings.shape === "fit")) return undefined;
   const { x0, x1, y0, y1 } = currentArea();
