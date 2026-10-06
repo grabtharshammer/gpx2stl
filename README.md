@@ -29,7 +29,8 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 | Vertical exaggeration | 2× | Makes hills taller than real life |
 | Terrain around route | 1.8 km | Margin around the track; resets any area edited on the map |
 | Detail | Standard (0.3 mm grid) | Draft 0.5 mm, Fine 0.2 mm. Finer = bigger file |
-| Trail style | Raised ridge | Or a carved groove |
+| Trail style | Raised | Raised ridge, carved groove, or **separate inlay**: the route prints as its own piece(s) in another colour and drops into a slot in the terrain. Each piece has a flat, sloped bottom (a best-fit plane), so it prints without supports; the route is split only where a piece would get taller than "Tallest piece". Download as a zip (terrain + numbered pieces laid flat) or a 3MF for multi-colour printers; a test-fit piece checks the clearance first |
+| Inlay clearance, slot depth, tallest piece | 0.15 mm, 3 mm, 10 mm | The base is raised (to about 5.7 mm) to make room for the slot |
 | Trail height/depth, width | 1.0 mm, 1.6 mm | |
 | Start / finish marker | Triangle / Square | None, Triangle, Circle, Square, Star or Hexagon; raised solids that face the direction of travel (the triangle points the way) |
 | Marker size, height | 6 mm, 2 mm | Height is above the highest ground under the marker |
@@ -43,7 +44,8 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 ## Layout
 
     web/                 the app (static site)
-      js/core/           engine: GPX parsing, PNG/tile decoding, filters, footprint shapes, model builder, STL writer
+      js/core/           engine: GPX parsing, PNG/tile decoding, filters, footprint shapes, markers, label text,
+                         elevation profile, inlay pieces, model builder, STL / ZIP / 3MF writers
       js/worker.js       runs the engine in a Web Worker; loads manifold-3d (WASM) from jsDelivr
       js/app.js          UI, print-area state and three.js preview
       js/mapview.js      Leaflet map: route + draggable/resizable print footprint

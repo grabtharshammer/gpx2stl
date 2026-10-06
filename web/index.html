@@ -92,11 +92,19 @@
         <div class="field">
           <span class="label">Style</span>
           <div class="seg" id="trail-style" role="radiogroup" aria-label="Trail style">
-            <button type="button" data-v="raised">Raised ridge</button>
-            <button type="button" data-v="groove">Carved groove</button>
+            <button type="button" data-v="raised" title="A raised ridge moulded into the terrain">Raised</button>
+            <button type="button" data-v="groove" title="A groove carved into the terrain">Groove</button>
+            <button type="button" data-v="inlay" title="Print the route separately, in another colour, and drop it into a slot">Inlay</button>
           </div>
         </div>
         <div id="trail-controls"></div>
+        <div id="inlay-body" hidden>
+          <p class="area-note">The route prints as its own piece(s) in another colour and drops into a slot in the terrain.
+            Each piece has a flat, gently sloped bottom, so it prints without supports.</p>
+          <div id="inlay-controls"></div>
+          <p class="area-note"><button class="link" type="button" id="coupon">Download a test-fit piece</button>
+            to check the clearance on your printer first.</p>
+        </div>
       </section>
 
       <section class="card">
@@ -173,15 +181,21 @@
           <button type="button" id="reset-view" title="Reset view" aria-label="Reset view">
             <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4"/></svg>
           </button>
+          <button type="button" id="explode" title="Lift the inlay out" aria-label="Lift the inlay out" aria-pressed="false" hidden>
+            <svg viewBox="0 0 24 24"><path d="M4 17l8 4 8-4M4 12l8 4 8-4M12 3v7m0-7-3 3m3-3 3 3"/></svg>
+          </button>
         </div>
         <div class="legend"><span class="sw trail"></span>route <span class="sw start"></span>start <span class="sw end"></span>finish <span class="hint-drag">&middot; drag to rotate, scroll to zoom</span></div>
       </div>
       <div class="result" id="result" hidden>
         <dl class="stats" id="stats"></dl>
-        <button class="primary download" id="download" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 19h16"/></svg>
-          Download STL <span id="download-size"></span>
-        </button>
+        <div class="downloads">
+          <button class="primary download" id="download" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0-4-4m4 4 4-4M4 19h16"/></svg>
+            <span id="download-label">Download STL</span> <span id="download-size"></span>
+          </button>
+          <button class="link" type="button" id="download-3mf" hidden>3MF for multi-colour printers</button>
+        </div>
       </div>
     </section>
   </main>

@@ -4,6 +4,9 @@ import { parseGpx, routeLength, trimSegments, routeIndex } from "./core/gpx.js";
 import { DEFAULTS, planGrid, routeFrame } from "./core/model.js";
 import { writeStl } from "./core/stl.js";
 import { FootprintMap } from "./mapview.js";
+import { layFlat } from "./core/inlay.js";
+import { makeZip } from "./core/zip.js";
+import { make3mf } from "./core/threemf.js";
 import { outline, roundedOutline, insidePolygon, fitHexagon } from "./core/footprint.js";
 import { MARKER_SHAPES, markerPolygon } from "./core/markers.js";
 import { layoutText, contoursToSvgPath } from "./core/text.js";
@@ -29,6 +32,11 @@ const SLIDERS = {
     { key: "markerSize", label: "Marker size", unit: "mm", min: 1, max: 15, step: 0.5 },
     { key: "markerHeight", label: "Marker height", unit: "mm", min: 0.5, max: 6, step: 0.5, help: "Above the highest ground under it" },
   ],
+  "inlay-controls": [
+    { key: "inlayClearance", label: "Clearance", unit: "mm", min: 0.05, max: 0.5, step: 0.05, help: "Gap on each side between inlay and slot" },
+    { key: "inlayDepth", label: "Slot depth", unit: "mm", min: 2, max: 6, step: 0.5, help: "How far the inlay sinks below the terrain, at least" },
+    { key: "inlayMaxHeight", label: "Tallest piece", unit: "mm", min: 6, max: 30, step: 1, help: "Allowing taller pieces means fewer of them" },
+  ],
   "label-controls": [
     { key: "labelSize", label: "Letter height", unit: "mm", min: 2, max: 12, step: 0.5, help: "Height of capital letters" },
     { key: "labelRelief", label: "Lettering depth", unit: "mm", min: 0.4, max: 2, step: 0.1, help: "How far letters stand up, or are cut in" },
@@ -46,6 +54,7 @@ const UI_DEFAULTS = {
   base: DEFAULTS.base, cornerRadius: DEFAULTS.cornerRadius, smooth: DEFAULTS.smooth,
   startMarker: "triangle", endMarker: "square", markerSize: DEFAULTS.markerSize, markerHeight: DEFAULTS.markerHeight,
   labelOn: false, labelStyle: "raised", labelSize: 4, labelRelief: 0.8, labelAngle: 0,
+  inlayClearance: 0.15, inlayDepth: 3, inlayMaxHeight: 10,
   labelUnits: /^en-(US|LR|MM)$/i.test(navigator.language) ? "imperial" : "metric",
 };
 
@@ -56,6 +65,8 @@ const save = () => { try { localStorage.setItem(STORE, JSON.stringify(settings))
 const engineOpts = () => ({
   size: settings.size, zExag: settings.zExag, marginKm: settings.marginKm, cell: settings.cell,
   trailHeight: settings.trailStyle === "groove" ? -settings.trailDepth : settings.trailDepth,
+  inlay: settings.trailStyle === "inlay"
+    ? { clearance: settings.inlayClearance, depth: settings.inlayDepth, maxHeight: settings.inlayMaxHeight } : null,
   trailWidth: settings.trailWidth, base: settings.base, cornerRadius: settings.cornerRadius, smooth: settings.smooth,
   area: engineArea(),
   origin: frame && { lat: frame.latc, lon: frame.lonc },   // keep the engine's frame = the map's when trimmed
@@ -130,7 +141,26 @@ function syncControls() {
 
 const depthLabel = document.querySelector('label[for="r-trailDepth"]');
 $("trail-style").addEventListener("click", () => syncTrailLabel());
-const syncTrailLabel = () => (depthLabel.textContent = settings.trailStyle === "groove" ? "Depth" : "Height");
+const syncTrailLabel = () => {
+  depthLabel.textContent = { groove: "Depth", inlay: "Stands proud by" }[settings.trailStyle] ?? "Height";
+  $("inlay-body").hidden = settings.trailStyle !== "inlay";
+};
+
+// test-fit coupon: a short slot and its inlay with the current width and clearance
+$("coupon").addEventListener("click", () => {
+  const w = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  w.onmessage = ({ data }) => {
+    w.terminate();
+    if (data.type !== "coupon") return showError(data.message);
+    const { block, piece } = data.coupon;
+    saveBlob(makeZip([
+      { name: "test-fit-slot.stl", data: writeStl(block.positions, block.indices, "test-fit slot") },
+      { name: "test-fit-inlay.stl", data: writeStl(piece.positions, piece.indices, "test-fit inlay") },
+    ]), `test-fit_${settings.trailWidth}mm_clearance-${settings.inlayClearance}mm.zip`);
+  };
+  w.postMessage({ id: 1, job: "coupon", opts: { width: settings.trailWidth, clearance: settings.inlayClearance,
+                                                 depth: settings.inlayDepth, proud: settings.trailDepth } });
+});
 
 $("reset").addEventListener("click", () => { settings = { ...UI_DEFAULTS }; override = null; syncControls(); syncTrailLabel(); changed(); });
 
@@ -581,7 +611,8 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x6b6050, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 2.2);
 sun.position.set(-1, 1.2, 1.4);
 scene.add(sun);
-let mesh = null;
+let meshes = [];          // terrain first, then any inlay pieces
+let exploded = false;
 
 const dark = matchMedia("(prefers-color-scheme: dark)");
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -623,21 +654,37 @@ function fitCamera() {
 }
 $("reset-view").addEventListener("click", fitCamera);
 
+function disposeMeshes() {
+  for (const ms of meshes) { scene.remove(ms); ms.geometry.dispose(); ms.material.dispose(); }
+  meshes = [];
+}
+
+function placeMeshes() {
+  if (!model) return;
+  const lift = exploded ? model.stats.height * 0.6 + 6 : 0;
+  meshes.forEach((ms, k) => ms.position.set(-model.stats.width / 2, -model.stats.depth / 2, k ? lift : 0));
+  requestRender();
+}
+
 function showModel(m, reframe = true) {
-  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
-  g.setIndex(new THREE.BufferAttribute(m.indices, 1));
+  disposeMeshes();
   const palette = [new THREE.Color(dark.matches ? 0xb9b3a4 : 0xd8d2c2), new THREE.Color(css("--accent")),
                    new THREE.Color(css("--start")), new THREE.Color(css("--finish")),
                    new THREE.Color(css("--plate")), new THREE.Color(css("--lettering"))];   // see core/model.js
-  const col = new Float32Array(m.trail.length * 3);
-  for (let i = 0; i < m.trail.length; i++) palette[m.trail[i]].toArray(col, i * 3);
-  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
-  mesh.position.set(-m.stats.width / 2, -m.stats.depth / 2, 0);   // don't move the vertices: they're also the STL
-  scene.add(mesh);
-  requestRender();
+  for (const part of [m, ...m.inlays]) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(part.positions, 3));
+    g.setIndex(new THREE.BufferAttribute(part.indices, 1));
+    const col = new Float32Array(part.trail.length * 3);
+    for (let i = 0; i < part.trail.length; i++) palette[part.trail[i]].toArray(col, i * 3);
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    // the mesh is moved, never the vertices: they're also what gets exported
+    const ms = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
+    scene.add(ms);
+    meshes.push(ms);
+  }
+  $("explode").hidden = !m.inlays.length;
+  placeMeshes();
   $("tabs").querySelector('[data-tab="3d"]').disabled = false;
   $("viewer").classList.add("has-model");
   if (reframe) fitCamera();
@@ -650,13 +697,23 @@ function showModel(m, reframe = true) {
     ["Volume", `${Math.round(s.volume)} cm³`],
     ["Triangles", s.triangles.toLocaleString()],
   ];
+  if (s.inlay) stats.splice(3, 0, ["Inlay", `${s.inlay.pieces} piece${s.inlay.pieces === 1 ? "" : "s"}, up to ${s.inlay.tallest.toFixed(1)} mm`],
+                                  ["Base", `${s.base.toFixed(1)} mm`]);
   $("stats").innerHTML = stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
-  $("download-size").textContent = `(${fmtMB(84 + 50 * s.triangles)})`;
+  $("download-size").textContent = `(${fmtMB(84 * (1 + m.inlays.length) + 50 * s.triangles)})`;
+  $("download-label").textContent = m.inlays.length ? "Download parts (.zip)" : "Download STL";
+  $("download-3mf").hidden = !m.inlays.length;
   $("result").hidden = false;
 }
 
+$("explode").addEventListener("click", () => {
+  exploded = !exploded;
+  $("explode").setAttribute("aria-pressed", exploded);
+  placeMeshes();
+});
+
 function clearModel() {
-  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); mesh = null; }
+  disposeMeshes();
   model = null;
   builtFor = null;
   $("viewer").classList.remove("has-model");
@@ -664,14 +721,44 @@ function clearModel() {
   $("tabs").querySelector('[data-tab="3d"]').disabled = true;
 }
 
-$("download").addEventListener("click", () => {
-  if (!model) return;
-  const blob = new Blob([writeStl(model.positions, model.indices, route.name)], { type: "model/stl" });
+function saveBlob(blob, name) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = (route.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "route") + ".stl";
+  a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+const fileBase = () => route.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "route";
+
+$("download").addEventListener("click", () => {
+  if (!model) return;
+  if (!model.inlays.length) {
+    return saveBlob(new Blob([writeStl(model.positions, model.indices, route.name)], { type: "model/stl" }), `${fileBase()}.stl`);
+  }
+  // terrain as it sits, inlay pieces turned to lie on their sloped bottoms, numbered along the route
+  const n = model.inlays.length;
+  saveBlob(makeZip([
+    { name: "terrain.stl", data: writeStl(model.positions, model.indices, `${route.name} terrain`) },
+    ...model.inlays.map((q, k) => ({
+      name: `inlay-${k + 1}-of-${n}.stl`, data: writeStl(layFlat(q.positions, q.plane), q.indices, `${route.name} inlay ${k + 1}`),
+    })),
+    { name: "README.txt", data: [
+      `${route.name}: terrain plus ${n} route inlay piece${n === 1 ? "" : "s"}.`, "",
+      "Print terrain.stl in one colour and the inlay pieces in another. The inlays are already",
+      "turned to lie on their flat (sloped) bottoms, so they need no supports.", "",
+      `Pieces are numbered from the start of the route (inlay-1) to the finish (inlay-${n}).`,
+      "Press each into its slot; a drop of glue holds them if the fit is loose.", "",
+      `Clearance ${settings.inlayClearance} mm per side, inlay width ${settings.trailWidth} mm, slot depth ${settings.inlayDepth} mm.`,
+    ].join("\r\n") },
+  ]), `${fileBase()}_parts.zip`);
+});
+
+$("download-3mf").addEventListener("click", () => {
+  if (!model) return;
+  saveBlob(make3mf([
+    { name: "Terrain", positions: model.positions, indices: model.indices, color: "#D8D2C2" },
+    ...model.inlays.map((q, k) => ({ name: `Route ${k + 1}`, positions: q.positions, indices: q.indices, color: "#E8590C" })),
+  ]), `${fileBase()}.3mf`);
 });
 
 syncControls();

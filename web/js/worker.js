@@ -2,6 +2,7 @@
 import { buildModel } from "./core/model.js";
 import { tileUrl, decodeTerrarium } from "./core/tiles.js";
 import { routeProfile } from "./core/profile.js";
+import { buildCoupon } from "./core/inlay.js";
 
 const MANIFOLD_URL = "https://cdn.jsdelivr.net/npm/manifold-3d@3.5.4/manifold.js";
 const CACHE = "gpx2stl-tiles-v1";
@@ -44,6 +45,13 @@ async function getTile(z, x, y) {
 }
 
 self.onmessage = async ({ data: { id, job = "build", segments, opts } }) => {
+  if (job === "coupon") {
+    try {
+      const c = buildCoupon(await getManifold(), opts);
+      self.postMessage({ id, type: "coupon", coupon: c });
+    } catch (err) { self.postMessage({ id, type: "error", message: err?.message ?? String(err) }); }
+    return;
+  }
   if (job === "profile") {
     try { self.postMessage({ id, type: "profile", profile: await routeProfile(segments, getTile) }); }
     catch (err) { self.postMessage({ id, type: "error", message: err?.message ?? String(err) }); }
@@ -54,7 +62,8 @@ self.onmessage = async ({ data: { id, job = "build", segments, opts } }) => {
     progress("engine", 0);
     const wasm = await getManifold();
     const m = await buildModel(segments, opts, { getTile, manifold: wasm, progress });
-    self.postMessage({ id, type: "done", model: m }, [m.positions.buffer, m.indices.buffer, m.trail.buffer]);
+    const buffers = [m.positions, m.indices, m.trail, ...m.inlays.flatMap((q) => [q.positions, q.indices, q.trail])];
+    self.postMessage({ id, type: "done", model: m }, buffers.map((b) => b.buffer));
   } catch (err) {
     self.postMessage({ id, type: "error", message: err?.message ?? String(err) });
   }

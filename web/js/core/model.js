@@ -4,6 +4,7 @@ import { TILE, lonLatToTile } from "./tiles.js";
 import { gaussianBlur, distanceTransform } from "./filters.js";
 import { outline } from "./footprint.js";
 import { markerPolygon, inPolygon } from "./markers.js";
+import { INLAY_DEFAULTS, planPieces, bufferPolyline, abovePlane } from "./inlay.js";
 
 const EARTH_R = 6371008.8;
 const MAX_TILES = 400;
@@ -28,6 +29,10 @@ export const DEFAULTS = {
   // text.js layoutText), width, height (plate, mm), style: "raised"|"engraved", relief (mm),
   // angle (degrees, counter-clockwise) }
   label: null,
+  // Separate route inlay (see inlay.js), or null for a ridge/groove moulded into the terrain:
+  // { clearance, depth, maxHeight, minFloor, maxTilt }. trailHeight is then how far the inlay
+  // stands above the terrain (>= 0) and trailWidth its width.
+  inlay: null,
   zoom: null,         // tile zoom; null = choose from cell size
   origin: null,       // { lat, lon } projection centre; null = mean of the route points
 };
@@ -118,12 +123,16 @@ async function loadDem(plan, getTile, progress) {
  * Build the model.
  *   getTile(z, x, y) -> Promise<Float64Array(256*256)> of metres
  *   manifold: initialised manifold-3d wasm module (after .setup())
- * Returns { positions: Float32Array, indices: Uint32Array, trail: Uint8Array (per vertex), stats }.
+ * Returns { positions: Float32Array, indices: Uint32Array, trail: Uint8Array (per vertex), stats,
+ *           inlays: [{ positions, indices, trail, plane, height, tilt }] (inlay mode only) }.
  */
 export async function buildModel(segments, opts, { getTile, manifold, progress = () => {} }) {
   const plan = planGrid(segments, opts);
   const { o, nx, ny, sc, xmin, xmax, ymin, ymax, z } = plan;
   const { cell } = o;
+  const inl = o.inlay && { ...INLAY_DEFAULTS, ...o.inlay };
+  // room for the slot under the lowest ground, plus headroom so sloped floors can dip a little there
+  if (inl) o.base = Math.max(o.base, inl.depth + inl.minFloor + 1.5);
 
   // terrain: bilinear sample of the tile mosaic at every grid point
   const { dem, w: dw, h: dh } = await loadDem(plan, getTile, progress);
@@ -151,61 +160,38 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   let emin = Infinity, emax = -Infinity;
   for (const e of elev) { emin = Math.min(emin, e); emax = Math.max(emax, e); }
 
-  // route: distance from the rasterised track, turned into a tapered bump
+  // route: distance from the rasterised track, turned into a tapered bump (not with an inlay)
   progress("route", 0);
-  const seed = new Uint8Array(nx * ny);
-  const step = cell / 4 / sc;
-  for (const s of segments) {
-    const pts = s.map(plan.toM);
-    let t = 0;
-    for (let k = 1; k < pts.length; k++) {
-      const [ax, ay] = pts[k - 1], [bx, by] = pts[k], len = Math.hypot(bx - ax, by - ay);
-      for (; t < len; t += step) {
-        const f = t / len;
-        const ix = Math.round(((ax + (bx - ax) * f - xmin) * sc) / cell);
-        const iy = Math.round(((ay + (by - ay) * f - ymin) * sc) / cell);
-        if (ix >= 0 && ix < nx && iy >= 0 && iy < ny) seed[iy * nx + ix] = 1;   // area may crop the route
-      }
-      t -= len;
-    }
-  }
-  const dist = distanceTransform(seed, nx, ny);
-  const half = o.trailWidth / 2, r0 = Math.max(half - 0.2, 0), r1 = half + 0.25;
   const Zt = new Float64Array(nx * ny), bump = new Float32Array(nx * ny);
   let zmax = 0;
+  if (!inl) {
+    const seed = new Uint8Array(nx * ny);
+    const step = cell / 4 / sc;
+    for (const s of segments) {
+      const pts = s.map(plan.toM);
+      let t = 0;
+      for (let k = 1; k < pts.length; k++) {
+        const [ax, ay] = pts[k - 1], [bx, by] = pts[k], len = Math.hypot(bx - ax, by - ay);
+        for (; t < len; t += step) {
+          const f = t / len;
+          const ix = Math.round(((ax + (bx - ax) * f - xmin) * sc) / cell);
+          const iy = Math.round(((ay + (by - ay) * f - ymin) * sc) / cell);
+          if (ix >= 0 && ix < nx && iy >= 0 && iy < ny) seed[iy * nx + ix] = 1;   // area may crop the route
+        }
+        t -= len;
+      }
+    }
+    const dist = distanceTransform(seed, nx, ny);
+    const half = o.trailWidth / 2, r0 = Math.max(half - 0.2, 0), r1 = half + 0.25;
+    for (let i = 0; i < Zt.length; i++) bump[i] = o.trailHeight * clip((r1 - dist[i] * cell) / (r1 - r0), 1);
+  }
   for (let i = 0; i < Zt.length; i++) {
-    bump[i] = o.trailHeight * clip((r1 - dist[i] * cell) / (r1 - r0), 1);
     Zt[i] = Math.max(o.base + (elev[i] - emin) * sc * o.zExag + bump[i], 0.6);  // floor if grooving
     zmax = Math.max(zmax, Zt[i]);
   }
 
-  // watertight solid: top grid, vertical walls, fan-triangulated flat bottom
   progress("mesh", 0);
   const W = (nx - 1) * cell, D = (ny - 1) * cell;
-  const per = [];
-  for (let i = 0; i < nx - 1; i++) per.push(i);                         // south edge, west->east
-  for (let j = 0; j < ny - 1; j++) per.push(j * nx + nx - 1);           // east edge, south->north
-  for (let i = nx - 1; i > 0; i--) per.push((ny - 1) * nx + i);         // north edge, east->west
-  for (let j = ny - 1; j > 0; j--) per.push(j * nx);                    // west edge, north->south
-  const nb = per.length, nTop = nx * ny, ci = nTop + nb;
-  const V = new Float32Array((nTop + nb + 1) * 3);
-  for (let j = 0, p = 0; j < ny; j++)
-    for (let i = 0; i < nx; i++, p += 3) { V[p] = i * cell; V[p + 1] = j * cell; V[p + 2] = Zt[j * nx + i]; }
-  per.forEach((t, k) => { V[(nTop + k) * 3] = V[t * 3]; V[(nTop + k) * 3 + 1] = V[t * 3 + 1]; });
-  V[ci * 3] = W / 2; V[ci * 3 + 1] = D / 2;
-
-  const F = new Uint32Array((2 * (nx - 1) * (ny - 1) + 3 * nb) * 3);
-  let f = 0;
-  const tri = (a, b, c) => { F[f++] = a; F[f++] = b; F[f++] = c; };
-  for (let j = 0; j < ny - 1; j++)
-    for (let i = 0; i < nx - 1; i++) {
-      const a = j * nx + i, b = a + 1, c = a + nx + 1, e = a + nx;
-      tri(a, b, c); tri(a, c, e);
-    }
-  for (let j = 0; j < nb; j++) {
-    const k = (j + 1) % nb, bj = nTop + j, bk = nTop + k;
-    tri(per[j], bj, bk); tri(per[j], bk, per[k]); tri(bk, bj, ci);
-  }
 
   // start/finish markers, facing the direction of travel
   const markers = [];
@@ -226,7 +212,7 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         if (Math.hypot(i - cx / cell, j - cy / cell) <= rad + 1) top = Math.max(top, Zt[j * nx + i]);
     markers.push({ kind, poly, cx, cy, top: top + o.markerHeight });
   };
-  const first = segments[0].map(plan.toM), last = segments.at(-1).map(plan.toM).reverse();
+  const first = segments[0].map(plan.toM), last = segments.at(-1).map(plan.toM).reverse();   // metres
   markerAt(2, o.startMarker, first);
   markerAt(3, o.endMarker, last);
   // label plate: flat top level with the highest ground under it
@@ -245,7 +231,8 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       }
     if (top > 0) label = { ...L, angle: L.angle ?? 0, cx, cy, local, top: top + 0.2 };   // 0.2 mm proud so the edge reads
   }
-  const ztop = Math.max(zmax, ...markers.map((m) => m.top),
+  const proud = inl ? Math.max(0, o.trailHeight) : 0;
+  const ztop = Math.max(zmax + proud, ...markers.map((m) => m.top),
                         label ? label.top + (label.style === "engraved" ? 0 : label.relief) : 0);
 
   progress("solid", 0);
@@ -253,8 +240,8 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   const trash = [];
   const keep = (x) => (trash.push(x), x);
   try {
-    let solid = keep(new Manifold(new Mesh({ numProp: 3, vertProperties: V, triVerts: F })));
-    for (const m of markers) {
+    let solid = keep(gridSolid(manifold, Zt, nx, cell, 0, nx - 1, 0, ny - 1));
+    for (const m of inl ? [] : markers) {        // with an inlay the markers ride on the inlay instead
       const cs = keep(keep(new CrossSection([m.poly])).intersect(keep(CrossSection.square([W, D]))));
       solid = keep(solid.add(keep(Manifold.extrude(cs, m.top))));
     }
@@ -268,16 +255,62 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         ? keep(solid.subtract(keep(keep(Manifold.extrude(text, label.relief + 1)).translate([0, 0, top - label.relief]))))
         : keep(solid.add(keep(keep(Manifold.extrude(text, label.relief)).translate([0, 0, top]))));
     }
+    // separate inlay: slot cut into the terrain, pieces built to drop into it
+    const pieces = [];
+    if (inl) {
+      const rIn = o.trailWidth / 2, rOut = rIn + inl.clearance, reach = Math.ceil(rOut / cell);
+      const heightAt = (x, y) => {             // lowest ground the slot cuts through; the inlay's top
+        const ci = Math.round(x / cell), cj = Math.round(y / cell);
+        let lo = Infinity, hi = 0;
+        for (let j = Math.max(0, cj - reach); j <= Math.min(ny - 1, cj + reach); j++)
+          for (let i = Math.max(0, ci - reach); i <= Math.min(nx - 1, ci + reach); i++) {
+            lo = Math.min(lo, Zt[j * nx + i]); hi = Math.max(hi, Zt[j * nx + i]);
+          }
+        return { lo: lo === Infinity ? Zt[0] : lo, top: hi + proud };
+      };
+      const lines = segments.map((s) => s.map((p) => { const [x, y] = plan.toM(p); return [(x - xmin) * sc, (y - ymin) * sc]; }));
+      const plans = planPieces(lines, heightAt, { ...inl, proud });
+      const cuts = [];
+      let taken = null;                        // outlines (with clearance) of earlier pieces
+      plans.forEach((pc, k) => {
+        const mk = markers.filter((m) => (m.kind === 2 && k === 0) || (m.kind === 3 && k === plans.length - 1));
+        const [nrm, off] = abovePlane(pc.plane);
+        let outer = keep(new CrossSection(bufferPolyline(pc.pts, rOut), "NonZero"));
+        for (const m of mk) outer = keep(outer.add(keep(keep(new CrossSection([m.poly])).offset(inl.clearance, "Round", 2, 16))));
+        let inner = keep(new CrossSection(bufferPolyline(pc.pts, rIn), "NonZero"));
+        if (taken) inner = keep(inner.subtract(taken));
+        cuts.push(keep(keep(Manifold.extrude(outer, ztop + 20)).trimByPlane(nrm, off)));
+        // the piece: from its floor plane up to the terrain surface (+ proud), over its outline
+        const bb = outer.bounds(), pad = 2;
+        const i0 = Math.max(0, Math.floor(bb.min[0] / cell) - pad), i1 = Math.min(nx - 1, Math.ceil(bb.max[0] / cell) + pad);
+        const j0 = Math.max(0, Math.floor(bb.min[1] / cell) - pad), j1 = Math.min(ny - 1, Math.ceil(bb.max[1] / cell) + pad);
+        if (i1 - i0 < 1 || j1 - j0 < 1) return;
+        const surface = keep(gridSolid(manifold, Zt, nx, cell, i0, i1, j0, j1, proud));
+        let piece = keep(keep(keep(Manifold.extrude(inner, ztop + 20)).trimByPlane(nrm, off)).intersect(surface));
+        for (const m of mk) {
+          let ms = keep(new CrossSection([m.poly]));
+          if (taken) ms = keep(ms.subtract(taken));
+          piece = keep(piece.add(keep(keep(Manifold.extrude(ms, m.top)).trimByPlane(nrm, off))));
+        }
+        taken = taken ? keep(taken.add(outer)) : outer;
+        pieces.push({ solid: piece, plane: pc.plane, height: pc.height, tilt: pc.tilt, markers: mk });
+      });
+      if (cuts.length) solid = keep(solid.subtract(keep(Manifold.union(cuts))));
+    }
+
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
+    let footprint = null;
     if (o.shape === "hex") {
       let cs = keep(new CrossSection([outline("hex", W, D)]));
       if (r > 0) cs = keep(keep(cs.offset(-r, "Miter")).offset(r, "Round", 2, 96));
-      solid = keep(solid.intersect(keep(Manifold.extrude(cs, ztop + 10))));
+      footprint = keep(Manifold.extrude(cs, ztop + 10));
     } else if (r > 0) {
       const sq = keep(keep(CrossSection.square([W - 2 * r, D - 2 * r])).translate([r, r]));
-      const cs = keep(sq.offset(r, "Round", 2, 96));
-      solid = keep(solid.intersect(keep(Manifold.extrude(cs, ztop + 10))));
+      footprint = keep(Manifold.extrude(keep(sq.offset(r, "Round", 2, 96)), ztop + 10));
+    } else if (pieces.length) {
+      footprint = keep(Manifold.extrude(keep(CrossSection.square([W, D])), ztop + 10));   // pieces may overhang the edge
     }
+    if (footprint) solid = keep(solid.intersect(footprint));
     const status = solid.status();
     if (status !== "NoError" || solid.isEmpty()) throw new Error(`Mesh is not a valid solid (${status})`);
     const mesh = solid.getMesh();
@@ -303,17 +336,95 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         else if (zz > label.top - label.relief - 0.005 && zz <= label.top + label.relief + 0.005) trail[v] = 5;
       }
     }
-    const indices = new Uint32Array(mesh.triVerts);
+    const indices = mergedTris(mesh);
+
+    // inlay pieces: trail colour, start/finish colours on their markers
+    const inlays = [];
+    let volume = solid.volume(), triangles = indices.length / 3;
+    for (const pc of pieces) {
+      const ps = footprint ? keep(pc.solid.intersect(footprint)) : pc.solid;
+      if (ps.isEmpty()) continue;
+      if (ps.status() !== "NoError") throw new Error(`Inlay is not a valid solid (${ps.status()})`);
+      const g = ps.getMesh(), gp = g.numProp, gv = g.vertProperties, n = gv.length / gp;
+      const pos = new Float32Array(n * 3), col = new Uint8Array(n).fill(1);
+      for (let v = 0; v < n; v++) {
+        const x = gv[v * gp], y = gv[v * gp + 1];
+        pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = gv[v * gp + 2];
+        for (const m of pc.markers) {
+          const k = 1.04, mx = m.cx + (x - m.cx) / k, my = m.cy + (y - m.cy) / k;
+          if (inPolygon(m.poly, mx, my)) col[v] = m.kind;
+        }
+      }
+      const idx = mergedTris(g);
+      inlays.push({ positions: pos, indices: idx, trail: col, plane: pc.plane, height: pc.height, tilt: pc.tilt });
+      volume += ps.volume();
+      triangles += idx.length / 3;
+    }
+
     return {
-      positions, indices, trail,
+      positions, indices, trail, inlays,
       stats: {
         width: W, depth: D, height: ztop,
-        scale: 1000 / sc, zExag: o.zExag,
+        scale: 1000 / sc, zExag: o.zExag, base: o.base,
         elevMin: emin, elevMax: emax, zoom: z, tiles: plan.tiles.count,
-        triangles: indices.length / 3, volume: solid.volume() / 1000,   // cm3
+        triangles, volume: volume / 1000,   // cm3
+        inlay: inl && {
+          pieces: inlays.length,
+          tallest: Math.max(0, ...inlays.map((q) => q.height)),
+          steepest: Math.max(0, ...inlays.map((q) => q.tilt)),
+        },
       },
     };
   } finally {
     for (const x of trash) try { x.delete(); } catch {}
   }
+}
+
+/**
+ * Watertight heightfield solid over grid cells i0..i1 x j0..j1: top surface at Z (+ dz), vertical
+ * walls, and a fan-triangulated flat bottom at z = 0.
+ */
+function gridSolid({ Manifold, Mesh }, Z, nx, cell, i0, i1, j0, j1, dz = 0) {
+  const gx = i1 - i0 + 1, gy = j1 - j0 + 1;
+  const per = [];
+  for (let i = 0; i < gx - 1; i++) per.push(i);                         // south edge, west->east
+  for (let j = 0; j < gy - 1; j++) per.push(j * gx + gx - 1);           // east edge, south->north
+  for (let i = gx - 1; i > 0; i--) per.push((gy - 1) * gx + i);         // north edge, east->west
+  for (let j = gy - 1; j > 0; j--) per.push(j * gx);                    // west edge, north->south
+  const nb = per.length, nTop = gx * gy, ci = nTop + nb;
+  const V = new Float32Array((nTop + nb + 1) * 3);
+  for (let j = 0, p = 0; j < gy; j++)
+    for (let i = 0; i < gx; i++, p += 3) {
+      V[p] = (i0 + i) * cell; V[p + 1] = (j0 + j) * cell; V[p + 2] = Z[(j0 + j) * nx + i0 + i] + dz;
+    }
+  per.forEach((t, k) => { V[(nTop + k) * 3] = V[t * 3]; V[(nTop + k) * 3 + 1] = V[t * 3 + 1]; });
+  V[ci * 3] = i0 * cell + ((gx - 1) * cell) / 2; V[ci * 3 + 1] = j0 * cell + ((gy - 1) * cell) / 2;
+
+  const F = new Uint32Array((2 * (gx - 1) * (gy - 1) + 3 * nb) * 3);
+  let f = 0;
+  const tri = (a, b, c) => { F[f++] = a; F[f++] = b; F[f++] = c; };
+  for (let j = 0; j < gy - 1; j++)
+    for (let i = 0; i < gx - 1; i++) {
+      const a = j * gx + i, b = a + 1, c = a + gx + 1, e = a + gx;
+      tri(a, b, c); tri(a, c, e);
+    }
+  for (let j = 0; j < nb; j++) {
+    const k = (j + 1) % nb, bj = nTop + j, bk = nTop + k;
+    tri(per[j], bj, bk); tri(per[j], bk, per[k]); tri(bk, bj, ci);
+  }
+  return new Manifold(new Mesh({ numProp: 3, vertProperties: V, triVerts: F }));
+}
+
+/**
+ * Triangle indices with manifold's seam duplicates merged (mergeFromVert -> mergeToVert), so
+ * indexed exports like 3MF are closed meshes. STL output is unchanged: positions are identical.
+ */
+function mergedTris(mesh) {
+  const t = new Uint32Array(mesh.triVerts), from = mesh.mergeFromVert, to = mesh.mergeToVert;
+  if (from?.length) {
+    const map = new Map();
+    for (let i = 0; i < from.length; i++) map.set(from[i], to[i]);
+    for (let i = 0; i < t.length; i++) { const m = map.get(t[i]); if (m !== undefined) t[i] = m; }
+  }
+  return t;
 }

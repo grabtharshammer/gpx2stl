@@ -187,3 +187,10 @@ path.fp-route-full { stroke: #e8590c; stroke-opacity: .35; stroke-dasharray: 2 6
 .fp-label-svg { pointer-events: none !important; }
 .fp-label-svg rect, .fp-label-svg path { pointer-events: auto; }
 .fp-rotate-handle { border-radius: 50%; border: 2px solid #1f2937; box-shadow: 0 1px 3px rgb(0 0 0 / .35); cursor: grab; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f2937' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4'/%3E%3C/svg%3E") center / 13px no-repeat; }
+.viewer-tools { display: flex; gap: 6px; }
+.viewer-tools button[aria-pressed=true] { background: var(--accent); border-color: var(--accent); }
+.viewer-tools button[aria-pressed=true] svg { stroke: var(--accent-ink); }
+.downloads { display: grid; justify-items: center; gap: 6px; }
+.downloads .link { font-size: 14px; }
+#inlay-body { margin-top: 12px; }
+#inlay-controls { margin-top: 12px; }

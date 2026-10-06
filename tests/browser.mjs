@@ -2,7 +2,7 @@
 //   cd tests && npm install --no-save puppeteer-core && node browser.mjs [chromium path] [screenshot dir]
 // Set BASE_URL to test a deployed copy instead of serving ../web locally.
 import http from "node:http";
-import { readFile, mkdtemp, readdir, stat } from "node:fs/promises";
+import { readFile, mkdtemp, readdir, stat, copyFile } from "node:fs/promises";
 import { join, extname, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -208,11 +208,39 @@ async function run(name, { width, height, dark }) {
   if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "custom") fail(`${name}: resizing in Fit mode didn't switch to Custom`);
   await click("#area-reset");
   if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "fit") fail(`${name}: Reset didn't return to Fit`);
+  // separate inlay: build, explode, download parts zip, 3MF and the test-fit coupon
+  await click('#trail-style [data-v="inlay"]');
+  const inl = await build("separate inlay");
+  if (!/INLAY \d+ pieces?, up to [\d.]+ mm/.test(inl)) fail(`${name}: no inlay stats in ${inl}`);
+  await click("#explode");
+  await sleep(800);
+  await page.screenshot({ path: join(shots, `${name}-model-inlay.png`) });
+  const before = new Set(await readdir(dl));
+  const fresh = async (ext) => {
+    for (let i = 0; i < 100; i++) {
+      const f = (await readdir(dl)).find((x) => x.endsWith(ext) && !before.has(x));
+      if (f) { before.add(f); return join(dl, f); }
+      await sleep(200);
+    }
+    fail(`${name}: no ${ext} download`);
+  };
+  await click("#download");
+  const zip = await fresh(".zip");
+  await click("#download-3mf");
+  const tmf = await fresh(".3mf");
+  await click("#coupon");
+  const coupon = await fresh(".zip");
+  for (const f of [zip, tmf, coupon].filter(Boolean)) {
+    console.log(`${name}: downloaded ${f.split("/").pop()} (${(await stat(f)).size.toLocaleString()} bytes)`);
+    await copyFile(f, join(shots, `${name}-${f.split("/").pop()}`));
+  }
   await ctx.close();
+  return { zip, tmf, coupon };
 }
 
+let files;
 try {
-  await run("desktop", { width: 1360, height: 860 });
+  files = await run("desktop", { width: 1360, height: 860 });
   await run("phone-dark", { width: 390, height: 844, dark: true });
 } finally {
   await browser.close();

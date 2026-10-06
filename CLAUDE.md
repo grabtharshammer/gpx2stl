@@ -62,6 +62,20 @@ Map dots snap via `routeIndex.nearest` (planar metres in the frame).
   the route and inside the footprint.
 - Without WebGL the app still works (no preview).
 
+## Separate inlay (core/inlay.js)
+`opts.inlay = {clearance, depth, maxHeight, minFloor, maxTilt}`: no bump in the terrain; instead
+`planPieces` samples the route every 0.5 mm (lo = lowest ground within the slot, top = highest
+ground + proud) and greedily grows pieces (gallop + binary search) while a sloped floor keeps the
+piece <= maxHeight and the floor >= minFloor. Floor fit = minimax: pattern search over the tilt
+minimising max(top - plane) - min(lo - plane), starting from least squares. Outlines are
+capsule polygons (`bufferPolyline`, non-zero union); later pieces subtract earlier pieces'
+outlines + clearance, so joints and crossings get a clearance gap. Terrain: subtract each piece's
+outer outline extruded and `trimByPlane`d above its floor. Piece: inner outline above its floor
+intersected with a heightfield patch (`gridSolid`, Zt + proud). Markers ride on the first/last
+piece. Base is raised to depth + minFloor + 1.5 mm. Exports: zip (terrain + `layFlat` pieces +
+README) and 3MF (assembled objects). Meshes use `mergedTris` so indexed exports are closed.
+Whole Enchilada at defaults: 3 pieces (single flat floor would need ~28 mm fins).
+
 ## 3D preview
 Renders on demand (`requestRender`), not every frame: a ~0.5M-triangle model at 60 fps drains
 batteries and stalled the Pi's software GL in the headless tests.

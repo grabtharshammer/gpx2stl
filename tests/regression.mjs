@@ -13,7 +13,8 @@ import { outline, fitHexagon } from "../web/js/core/footprint.js";
 import { writeStl } from "../web/js/core/stl.js";
 import { layoutText } from "../web/js/core/text.js";
 import { routeProfile, routeTimes } from "../web/js/core/profile.js";
-import * as opentype from "opentype.js/dist/opentype.mjs";   // same build the browser loads
+import * as opentype from "opentype.js/dist/opentype.mjs";
+import { layFlat } from "../web/js/core/inlay.js";   // same build the browser loads
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cache = process.argv[2] ?? join(here, "tile_cache");
@@ -131,5 +132,30 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
   console.log(`profile: high ${prof.max.toFixed(0)} m, low ${prof.min.toFixed(0)} m, +${prof.gain.toFixed(0)} / -${prof.loss.toFixed(0)} m; times ${JSON.stringify(routeTimes(gpx.segments))}`);
   if (!(prof.max > 3000 && prof.min < 1300 && prof.loss > prof.gain)) { bad++; console.log("MISMATCH profile"); }
   console.log(bad ? "FAILED" : "OK: label + profile");
+}
+// Inlay: pieces are valid, fit their slot without touching the terrain, and lie flat on their floor.
+{
+  const toManifold = (pos, idx) => new wasm.Manifold(new wasm.Mesh({ numProp: 3, vertProperties: pos, triVerts: idx }));
+  const im = await buildModel(gpx.segments, { inlay: {}, startMarker: "triangle", endMarker: "square" }, { getTile, manifold: wasm });
+  const terrain = toManifold(im.positions, im.indices);
+  const st = im.stats.inlay;
+  console.log(`inlay: ${st.pieces} piece(s), tallest ${st.tallest.toFixed(1)} mm, steepest floor ${st.steepest.toFixed(1)}°, ` +
+              `base raised to ${im.stats.base} mm, ${im.stats.triangles.toLocaleString("en")} triangles`);
+  if (!st.pieces) { bad++; console.log("MISMATCH no inlay pieces"); }
+  im.inlays.forEach((q, k) => {
+    const piece = toManifold(q.positions, q.indices);
+    const overlap = terrain.intersect(piece).volume();
+    const flat = layFlat(q.positions, q.plane);
+    let onBed = 0;
+    for (let i = 2; i < flat.length; i += 3) if (flat[i] < 0.01) onBed++;
+    const markers = [...new Set(q.trail)].filter((t) => t > 1);
+    console.log(`  piece ${k + 1}: ${(piece.volume() / 1000).toFixed(2)} cm3, tilt ${q.tilt.toFixed(1)}°, height ${q.height.toFixed(1)} mm, ` +
+                `overlap with terrain ${overlap.toFixed(3)} mm3, ${onBed} vertices on the bed, markers ${markers.join(",") || "-"}`);
+    if (overlap > 0.5) { bad++; console.log("MISMATCH inlay overlaps the terrain"); }
+    if (onBed < 10) { bad++; console.log("MISMATCH piece does not lie flat"); }
+    if (out) writeFile(out.replace(/[.]stl$/, `-inlay-${k + 1}.stl`), Buffer.from(writeStl(flat, q.indices, `inlay ${k + 1}`)));
+  });
+  if (out) await writeFile(out.replace(/[.]stl$/, "-inlay-terrain.stl"), Buffer.from(writeStl(im.positions, im.indices, "terrain")));
+  console.log(bad ? "FAILED" : "OK: inlay");
 }
 process.exit(bad ? 1 : 0);
