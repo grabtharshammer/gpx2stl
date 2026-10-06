@@ -6,7 +6,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Module from "manifold-3d";
-import { parseGpx } from "../web/js/core/gpx.js";
+import { parseGpx, routeLength, trimSegments, routeIndex } from "../web/js/core/gpx.js";
 import { tileUrl, decodeTerrarium } from "../web/js/core/tiles.js";
 import { buildModel, routeFrame } from "../web/js/core/model.js";
 import { outline, fitHexagon } from "../web/js/core/footprint.js";
@@ -94,5 +94,18 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
   if (!(mm.stats.volume > s.volume)) { bad++; console.log("MISMATCH markers added no volume"); }
   if (out) await writeFile(out.replace(/\.stl$/, "-markers.stl"), Buffer.from(writeStl(mm.positions, mm.indices, "markers")));
   console.log(bad ? "FAILED" : "OK: markers");
+}
+// Trimming: the whole range is a no-op; a cut gives exactly the requested length and snaps back.
+{
+  const L = routeLength(gpx.segments);
+  const same = JSON.stringify(trimSegments(gpx.segments, 0, L)) === JSON.stringify(gpx.segments);
+  const cut = trimSegments(gpx.segments, 5000, 20000), cl = routeLength(cut);
+  const f = routeFrame(gpx.segments), idx = routeIndex(gpx.segments, f.toM);
+  const back = idx.nearest(...f.toM(cut[0][0])).distance;
+  console.log(`trim: full range unchanged ${same}; 5–20 km cut is ${(cl / 1000).toFixed(4)} km; start snaps to ${(back / 1000).toFixed(4)} km`);
+  if (!same || Math.abs(cl - 15000) > 1 || Math.abs(back - 5000) > 1 || Math.abs(idx.length - L) > 1e-6) {
+    bad++; console.log("MISMATCH trimming");
+  }
+  console.log(bad ? "FAILED" : "OK: trimming");
 }
 process.exit(bad ? 1 : 0);

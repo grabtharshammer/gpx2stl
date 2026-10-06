@@ -37,17 +37,67 @@ export function parseGpx(text) {
   return { name, segments };
 }
 
-/** Great-circle length of all segments, in metres. */
+/** Great-circle distance between two [lat, lon] points, in metres. */
+export function haversine([la1, lo1], [la2, lo2]) {
+  const p1 = (la1 * Math.PI) / 180, p2 = (la2 * Math.PI) / 180;
+  const dp = p2 - p1, dl = ((lo2 - lo1) * Math.PI) / 180;
+  const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * EARTH_R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/** Great-circle length of all segments, in metres (gaps between segments don't count). */
 export function routeLength(segments) {
   let d = 0;
-  for (const s of segments) {
-    for (let i = 1; i < s.length; i++) {
-      const [la1, lo1] = s[i - 1], [la2, lo2] = s[i];
-      const p1 = (la1 * Math.PI) / 180, p2 = (la2 * Math.PI) / 180;
-      const dp = p2 - p1, dl = ((lo2 - lo1) * Math.PI) / 180;
-      const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
-      d += 2 * EARTH_R * Math.asin(Math.min(1, Math.sqrt(a)));
-    }
-  }
+  for (const s of segments) for (let i = 1; i < s.length; i++) d += haversine(s[i - 1], s[i]);
   return d;
+}
+
+const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+
+/** The part of the route between `from` and `to` metres along it, cut exactly at those points. */
+export function trimSegments(segments, from, to) {
+  const out = [];
+  let d = 0;
+  for (const s of segments) {
+    const cur = [];
+    if (d >= from && d <= to) cur.push(s[0]);
+    for (let i = 1; i < s.length; i++) {
+      const len = haversine(s[i - 1], s[i]), d0 = d, d1 = d + len;
+      if (d0 < from && d1 > from) cur.push(lerp(s[i - 1], s[i], (from - d0) / len));
+      if (d1 > from && d0 < to) cur.push(d1 <= to ? s[i] : lerp(s[i - 1], s[i], (to - d0) / len));
+      d = d1;
+    }
+    if (cur.length > 1) out.push(cur);
+  }
+  return out;
+}
+
+/**
+ * Lookup for snapping to the route. toM projects [lat, lon] to planar metres.
+ * nearest(x, y) -> { distance (metres along the route), point: [lat, lon] } of the closest spot.
+ */
+export function routeIndex(segments, toM) {
+  const parts = [];
+  let d = 0;
+  for (const s of segments) {
+    const cum = [d];
+    for (let i = 1; i < s.length; i++) cum.push((d += haversine(s[i - 1], s[i])));
+    parts.push({ ll: s, m: s.map(toM), cum });
+  }
+  return {
+    length: d,
+    nearest(x, y) {
+      let best = { d2: Infinity };
+      for (const { ll, m, cum } of parts) {
+        for (let i = 1; i < m.length; i++) {
+          const [ax, ay] = m[i - 1], [bx, by] = m[i], dx = bx - ax, dy = by - ay;
+          const l2 = dx * dx + dy * dy;
+          const t = l2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0;
+          const d2 = (ax + dx * t - x) ** 2 + (ay + dy * t - y) ** 2;
+          if (d2 < best.d2) best = { d2, distance: cum[i - 1] + (cum[i] - cum[i - 1]) * t, point: lerp(ll[i - 1], ll[i], t) };
+        }
+      }
+      return best;
+    },
+  };
 }

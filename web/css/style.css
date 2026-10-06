@@ -153,8 +153,10 @@ input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
 path.fp-box { stroke: #1f2937; stroke-dasharray: 7 5; fill: #1f2937; fill-opacity: .07; cursor: move; }
 path.fp-casing { stroke: #fff; stroke-opacity: .9; stroke-linecap: round; stroke-linejoin: round; }
 path.fp-route { stroke: #e8590c; stroke-linecap: round; stroke-linejoin: round; }
-path.fp-start { stroke: #fff; stroke-width: 2; fill: #2f9e44; fill-opacity: 1; }
-path.fp-end { stroke: #fff; stroke-width: 2; fill: #c92a2a; fill-opacity: 1; }
+path.fp-route-full { stroke: #e8590c; stroke-opacity: .35; stroke-dasharray: 2 6; stroke-linecap: round; }
+.fp-dot { border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .45); cursor: grab; }
+.fp-dot-start { background: #2f9e44; }
+.fp-dot-end { background: #c92a2a; }
 .fp-handle { background: #fff; border: 2px solid #1f2937; border-radius: 4px; box-shadow: 0 1px 3px rgb(0 0 0 / .35); }
 .fp-nw, .fp-se { cursor: nwse-resize; }
 .fp-ne, .fp-sw { cursor: nesw-resize; }
@@ -165,3 +167,5 @@ path.fp-end { stroke: #fff; stroke-width: 2; fill: #c92a2a; fill-opacity: 1; }
 }
 #shape { display: flex; }
 #shape button { flex: 1 1 auto; font-size: 13.5px; }
+.trim { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.trim .area-note { margin-top: 8px; }

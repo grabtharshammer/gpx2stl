@@ -1,7 +1,7 @@
 # gpx2stl
 
 Turn a GPX track into a 3D-printable terrain relief with the route marked on it.
-Everything runs in the browser: drop in a GPX file, choose the print area on a topo map, adjust
+Everything runs in the browser: drop in a GPX file, trim it, choose the print area on a topo map, adjust
 the settings, preview the model in 3D and download a watertight STL. Your GPX file never leaves
 your computer.
 
@@ -23,6 +23,7 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 
 | Setting | Default | Meaning |
 |---|---|---|
+| Start at / Finish at | whole route | Trim the track: use the sliders, or drag the green/red dots along the route on the map |
 | Shape | Fit route | Fit route, Square, 3:2, Hexagon, or Custom. Drag the shape on the map to move it, drag its corners to resize (Square, 3:2 and Hexagon keep their proportions). Hexagon fits itself tightly around the route and picks flat- or pointy-top, whichever is smaller |
 | Size | 180 mm | Longest side of the model |
 | Vertical exaggeration | 2× | Makes hills taller than real life |

@@ -36,6 +36,18 @@ as the reference implementation.
   ridge along the edge).
 - Map: Leaflet 1.9.4 ESM + OpenTopoMap tiles (needs attribution; fine for hobby traffic).
 
+## Trimming (core/gpx.js trimSegments / routeIndex)
+`trim = {from, to}` metres along the route (great-circle, gaps between segments not counted).
+`trimSegments` cuts exactly at those distances (interpolated points); the full range returns the
+original segments. Everything downstream (fit area, hexagon, markers, engine) uses the trimmed
+`segs`. The UI frame stays on the whole route and the engine gets `opts.origin` = that frame's
+centre, so map and engine agree after trimming (untrimmed, origin = route mean = engine default).
+Map dots snap via `routeIndex.nearest` (planar metres in the frame).
+
+## 3D preview
+Renders on demand (`requestRender`), not every frame: a ~0.5M-triangle model at 60 fps drains
+batteries and stalled the Pi's software GL in the headless tests.
+
 ## Markers (core/markers.js)
 `startMarker` / `endMarker` (engine default "none", UI default triangle / square): the shape's
 outline (CCW polygon, `markerPolygon`) is rotated to the direction of travel, clipped to the grid,

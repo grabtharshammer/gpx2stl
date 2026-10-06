@@ -25,16 +25,18 @@ export const DEFAULTS = {
   markerSize: 6,      // mm across
   markerHeight: 2,    // mm above the highest terrain under the marker
   zoom: null,         // tile zoom; null = choose from cell size
+  origin: null,       // { lat, lon } projection centre; null = mean of the route points
 };
 
 /**
- * Local equirectangular frame centred on the route: metres east/north of the centre.
+ * Local equirectangular frame centred on the route (or on `origin`): metres east/north of it.
  * x depends only on longitude and y only on latitude, so lat/lon boxes map to rectangles.
  */
-export function routeFrame(segments) {
+export function routeFrame(segments, origin = null) {
   let latc = 0, lonc = 0, n = 0;
   for (const s of segments) for (const [la, lo] of s) { latc += la; lonc += lo; n++; }
   latc /= n; lonc /= n;
+  if (origin) ({ lat: latc, lon: lonc } = origin);
   const cosl = Math.cos(latc * RAD);
   const toM = ([la, lo]) => [(lo - lonc) * RAD * EARTH_R * cosl, (la - latc) * RAD * EARTH_R];
   const lonOf = (x) => lonc + x / (EARTH_R * cosl) / RAD;
@@ -55,7 +57,7 @@ export function routeFrame(segments) {
  */
 export function planGrid(segments, opts) {
   const o = { ...DEFAULTS, ...opts };
-  const frame = routeFrame(segments);
+  const frame = routeFrame(segments, o.origin);
   const { latc, lonc, cosl, toM, lonOf, latOf } = frame;
   let { xmin, xmax, ymin, ymax } = frame.bounds;
   if (o.area) {

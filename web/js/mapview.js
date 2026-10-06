@@ -15,8 +15,14 @@ function handleFractions(shape, w, h) {
 }
 
 export class FootprintMap {
-  constructor(el, { onChange }) {
+  /**
+   * onChange(area, final) — the print area was moved/resized on the map.
+   * onTrim(end, lat, lon, final) — a start/finish dot was dragged; end is "start" or "end".
+   *   Returns the [lat, lon] the dot should snap to.
+   */
+  constructor(el, { onChange, onTrim }) {
     this.onChange = onChange;
+    this.onTrim = onTrim;
     this.map = L.map(el, { zoomSnap: 0.25, zoomControl: true, attributionControl: true });
     L.tileLayer("https://tile.opentopomap.org/{z}/{x}/{y}.png", {
       maxZoom: 17,
@@ -25,7 +31,8 @@ export class FootprintMap {
     }).addTo(this.map);
     this.map.attributionControl.setPrefix(false);
     this.map.setView([39, -98], 4);
-    this.routeLayer = L.layerGroup().addTo(this.map);
+    this.routeLayer = L.layerGroup().addTo(this.map);   // whole route, faint
+    this.trimLayer = L.layerGroup().addTo(this.map);    // the part that gets printed
     this.box = L.polygon([], { className: "fp-box", weight: 2, fillOpacity: 0.08 }).addTo(this.map);
     this.handles = {};
     for (const k of ["sw", "se", "ne", "nw", "c"]) {
@@ -37,18 +44,41 @@ export class FootprintMap {
       h.on("dragend", () => this.#drag(k, h.getLatLng(), true));
       this.handles[k] = h;
     }
+    this.dots = {};
+    for (const k of ["start", "end"]) {
+      const d = L.marker([0, 0], {
+        draggable: true, keyboard: false, opacity: 0, zIndexOffset: 1000,
+        title: k === "start" ? "Start: drag along the route to trim" : "Finish: drag along the route to trim",
+        icon: L.divIcon({ className: `fp-dot fp-dot-${k}`, iconSize: [16, 16] }),
+      }).addTo(this.map);
+      const snap = (final) => {
+        const { lat, lng } = d.getLatLng();
+        d.setLatLng(this.onTrim(k, lat, lng, final));
+      };
+      d.on("dragstart", () => (this.draggingDot = k));
+      d.on("drag", () => snap(false));
+      d.on("dragend", () => { this.draggingDot = null; snap(true); });
+      this.dots[k] = d;
+    }
     this.#bodyDrag();
   }
 
   setRoute(segments, frame) {
     this.frame = frame;
     this.routeLayer.clearLayers();
-    for (const s of segments) L.polyline(s, { className: "fp-casing", weight: 6, interactive: false }).addTo(this.routeLayer);
-    for (const s of segments) L.polyline(s, { className: "fp-route", weight: 3, interactive: false }).addTo(this.routeLayer);
-    const first = segments[0][0], last = segments.at(-1).at(-1);
-    L.circleMarker(first, { className: "fp-start", radius: 5, interactive: false }).addTo(this.routeLayer);
-    L.circleMarker(last, { className: "fp-end", radius: 5, interactive: false }).addTo(this.routeLayer);
-    for (const h of Object.values(this.handles)) h.setOpacity(1);
+    for (const s of segments) L.polyline(s, { className: "fp-route-full", weight: 3, interactive: false }).addTo(this.routeLayer);
+    this.setTrimmed(segments);
+    for (const h of [...Object.values(this.handles), ...Object.values(this.dots)]) h.setOpacity(1);
+  }
+
+  /** Highlight the printed part of the route and put the start/finish dots on its ends. */
+  setTrimmed(segments) {
+    this.trimLayer.clearLayers();
+    for (const s of segments) L.polyline(s, { className: "fp-casing", weight: 6, interactive: false }).addTo(this.trimLayer);
+    for (const s of segments) L.polyline(s, { className: "fp-route", weight: 3, interactive: false }).addTo(this.trimLayer);
+    // the dot being dragged is placed by its own snap
+    if (this.draggingDot !== "start") this.dots.start.setLatLng(segments[0][0]);
+    if (this.draggingDot !== "end") this.dots.end.setLatLng(segments.at(-1).at(-1));
   }
 
   /**

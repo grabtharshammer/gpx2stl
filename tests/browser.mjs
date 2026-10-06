@@ -151,6 +151,26 @@ async function run(name, { width, height, dark }) {
   console.log(`${name}: hexagon resized: ${hx2}`);
   await page.screenshot({ path: join(shots, `${name}-model-hex.png`) });
 
+  // trimming: slider, then drag the finish dot along the route on the map
+  await click('#shape [data-v="fit"]');
+  await sleep(1000);   // the map animates its zoom to the new box
+  await page.$eval("#trim-from", (r) => { r.value = 8000; r.dispatchEvent(new Event("input")); });
+  const note1 = await page.$eval("#trim-note", (e) => e.innerText);
+  if (!/Printing 39\.4 km of 47\.4 km/.test(note1)) fail(`${name}: trim slider gave "${note1}"`);
+  await page.$eval("#viewer", (v) => v.scrollIntoView({ block: "center" }));
+  const area0 = await info();
+  await drag(".fp-dot-end", 120, -60);
+  const note2 = await page.$eval("#trim-note", (e) => e.innerText), area1 = await info();
+  console.log(`${name}: trimmed: ${note2.split(".")[0]}; area ${area1}`);
+  if (note2 === note1) fail(`${name}: dragging the finish dot didn't trim`);
+  if (area1 === area0) fail(`${name}: print area didn't follow the trimmed route`);
+  await page.screenshot({ path: join(shots, `${name}-map-trim.png`) });
+  await build("trimmed");
+  await page.screenshot({ path: join(shots, `${name}-model-trim.png`) });
+  await click('#tabs [data-tab="map"]');
+  await click("#trim-reset");
+  if (!/Or drag/.test(await page.$eval("#trim-note", (e) => e.innerText))) fail(`${name}: trim reset failed`);
+
   // free resize in Fit mode switches to Custom
   await click('#tabs [data-tab="map"]');
   await click('#shape [data-v="fit"]');

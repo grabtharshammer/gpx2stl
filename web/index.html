@@ -42,6 +42,17 @@
           <div class="route-name" id="route-name"></div>
           <div class="route-meta" id="route-meta"></div>
           <button class="link" id="change-route" type="button">Choose another file</button>
+          <div class="trim">
+            <div class="field">
+              <div class="row"><label class="label" for="trim-from">Start at</label><span class="val" id="trim-from-v"></span></div>
+              <input type="range" id="trim-from" min="0" step="any">
+            </div>
+            <div class="field">
+              <div class="row"><label class="label" for="trim-to">Finish at</label><span class="val" id="trim-to-v"></span></div>
+              <input type="range" id="trim-to" min="0" step="any">
+            </div>
+            <p class="area-note" id="trim-note"></p>
+          </div>
         </div>
         <p class="hint" id="example-hint">No file handy? <button class="link" id="example" type="button">Try the Whole Enchilada (Moab)</button></p>
       </section>

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { parseGpx, routeLength } from "./core/gpx.js";
+import { parseGpx, routeLength, trimSegments, routeIndex } from "./core/gpx.js";
 import { DEFAULTS, planGrid, routeFrame } from "./core/model.js";
 import { writeStl } from "./core/stl.js";
 import { FootprintMap } from "./mapview.js";
@@ -49,6 +49,7 @@ const engineOpts = () => ({
   trailHeight: settings.trailStyle === "groove" ? -settings.trailDepth : settings.trailDepth,
   trailWidth: settings.trailWidth, base: settings.base, cornerRadius: settings.cornerRadius, smooth: settings.smooth,
   area: engineArea(),
+  origin: frame && { lat: frame.latc, lon: frame.lonc },   // keep the engine's frame = the map's when trimmed
   shape: footprintShape(),
   startMarker: settings.startMarker, endMarker: settings.endMarker,
   markerSize: settings.markerSize, markerHeight: settings.markerHeight,
@@ -124,7 +125,11 @@ $("reset").addEventListener("click", () => { settings = { ...UI_DEFAULTS }; over
 // ------------------------------------------------------------------ route loading
 let route = null;      // { name, segments, fileName }
 let frame = null;      // local metre frame of the route (core/model.js routeFrame)
-let routePts = [];     // route points in that frame, metres
+let index = null;      // snapping lookup over the whole route (core/gpx.js routeIndex)
+let trim = null;       // printed part of the route: { from, to } metres along it
+let segs = [];         // the trimmed route segments; everything downstream uses these
+let routePts = [];     // trimmed route points in the frame, metres
+let bounds = null;     // their bounding box
 let override = null;   // print area set on the map, { x0, x1, y0, y1 } metres; null = automatic
 let model = null;      // last built model
 let builtFor = null;   // JSON of the settings + route the model was built with
@@ -133,15 +138,49 @@ let builtFor = null;   // JSON of the settings + route the model was built with
 const RATIOS = { square: 1, "3:2": 1.5 };
 const footprintShape = () => (settings.shape === "hex" ? "hex" : "rect");
 
+// ------------------------------------------------------------------ trimming
+const TRIM_GAP = 100;   // metres; shortest route that can be printed
+const fmtKm = (m) => `${(m / 1000).toFixed(1)} km`;
+
+function applyTrim() {
+  const full = trim.from <= 0 && trim.to >= index.length;
+  segs = full ? route.segments : trimSegments(route.segments, trim.from, trim.to);
+  routePts = segs.flat().map(frame.toM);
+  bounds = { xmin: Infinity, xmax: -Infinity, ymin: Infinity, ymax: -Infinity };
+  for (const [x, y] of routePts) {
+    bounds.xmin = Math.min(bounds.xmin, x); bounds.xmax = Math.max(bounds.xmax, x);
+    bounds.ymin = Math.min(bounds.ymin, y); bounds.ymax = Math.max(bounds.ymax, y);
+  }
+  fpMap.setTrimmed(segs);
+  $("trim-from").value = trim.from;
+  $("trim-to").value = trim.to;
+  $("trim-from-v").textContent = fmtKm(trim.from);
+  $("trim-to-v").textContent = fmtKm(trim.to);
+  $("trim-note").innerHTML = full
+    ? "Or drag the green and red dots along the route on the map."
+    : `Printing ${fmtKm(trim.to - trim.from)} of ${fmtKm(index.length)}. ` +
+      `<button class="link" type="button" id="trim-reset">Use the whole route</button>`;
+  $("trim-reset")?.addEventListener("click", () => { trim = { from: 0, to: index.length }; applyTrim(); changed(); });
+}
+
+function setTrim(end, metres) {
+  if (end === "start") trim.from = Math.max(0, Math.min(metres, trim.to - TRIM_GAP));
+  else trim.to = Math.min(index.length, Math.max(metres, trim.from + TRIM_GAP));
+  applyTrim();
+  changed();
+}
+$("trim-from").addEventListener("input", (e) => setTrim("start", +e.target.value));
+$("trim-to").addEventListener("input", (e) => setTrim("end", +e.target.value));
+
 function autoHexagon() {
-  const b = frame.bounds;
+  const b = bounds;
   return fitHexagon(routePts, (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, settings.marginKm * 1000);
 }
 
 /** Locked width/height ratio for the current shape, oriented like the route; null = free. */
 function aspect() {
   if (settings.shape === "hex") return autoHexagon().flat ? 2 / Math.sqrt(3) : Math.sqrt(3) / 2;
-  const r = RATIOS[settings.shape], b = frame.bounds;
+  const r = RATIOS[settings.shape], b = bounds;
   return r ? (b.xmax - b.xmin >= b.ymax - b.ymin ? r : 1 / r) : null;
 }
 
@@ -151,7 +190,7 @@ function currentArea() {
     const { x0, x1, y0, y1 } = autoHexagon();
     return { x0, x1, y0, y1 };
   }
-  const b = frame.bounds, m = settings.marginKm * 1000;
+  const b = bounds, m = settings.marginKm * 1000;
   let x0 = b.xmin - m, x1 = b.xmax + m, y0 = b.ymin - m, y1 = b.ymax + m;
   const a = aspect();
   if (a) {
@@ -175,6 +214,10 @@ const fpMap = new FootprintMap($("map"), {
     override = area;
     if (settings.shape === "fit") { settings.shape = "custom"; syncControls(); }
     changed({ fromMap: !final });
+  },
+  onTrim(end, lat, lon) {
+    setTrim(end, index.nearest(...frame.toM([lat, lon])).distance);
+    return end === "start" ? segs[0][0] : segs.at(-1).at(-1);
   },
 });
 
@@ -202,6 +245,7 @@ function updateArea(p, fromMap) {
 // ------------------------------------------------------------------ tabs
 function showTab(t) {
   $("viewer").dataset.tab = t;
+  if (t === "3d") requestRender();
   for (const b of $("tabs").querySelectorAll("button")) b.setAttribute("aria-selected", b.dataset.tab === t);
   if (t === "map") fpMap.invalidate();
 }
@@ -229,7 +273,9 @@ async function loadText(text, fileName) {
   showError(null);
 
   frame = routeFrame(route.segments);
-  routePts = route.segments.flat().map(frame.toM);
+  index = routeIndex(route.segments, frame.toM);
+  trim = { from: 0, to: index.length };
+  for (const id of ["trim-from", "trim-to"]) Object.assign($(id), { max: index.length });
   override = null;
   if (settings.shape === "custom") settings.shape = "fit";
   syncControls();
@@ -238,6 +284,7 @@ async function loadText(text, fileName) {
   $("tabs").hidden = false;
   showTab("map");
   fpMap.setRoute(route.segments, frame);
+  applyTrim();
   changed();
   fpMap.fit();
 }
@@ -265,13 +312,13 @@ for (const t of [document.body]) {
 
 // ------------------------------------------------------------------ estimate + state
 const fmtMB = (bytes) => (bytes / 1e6 < 10 ? (bytes / 1e6).toFixed(1) : Math.round(bytes / 1e6)) + " MB";
-const key = () => route && JSON.stringify([route.fileName, route.segments.length, engineOpts()]);
+const key = () => route && JSON.stringify([route.fileName, route.segments.length, trim, engineOpts()]);
 
 function changed({ fromMap = false } = {}) {
   save();
   const est = $("estimate"), btn = $("generate");
   if (!route) { est.textContent = ""; btn.disabled = true; return; }
-  const p = planGrid(route.segments, engineOpts());
+  const p = planGrid(segs, engineOpts());
   updateArea(p, fromMap);
   const bytes = 84 + 50 * p.triangles;
   const tooMany = p.tiles.count > 400;
@@ -332,7 +379,7 @@ function generate() {
     worker = null;
     changed();
   };
-  worker.postMessage({ id, segments: route.segments, opts: engineOpts() });
+  worker.postMessage({ id, segments: segs, opts: engineOpts() });
 }
 $("generate").addEventListener("click", generate);
 
@@ -359,17 +406,30 @@ let mesh = null;
 
 const dark = matchMedia("(prefers-color-scheme: dark)");
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-function applyTheme() { scene.background = new THREE.Color(css("--viewer")); if (model) showModel(model, false); }
+function applyTheme() { scene.background = new THREE.Color(css("--viewer")); if (model) showModel(model, false); requestRender(); }
 dark.addEventListener("change", applyTheme);
 
 new ResizeObserver(() => {
   const { clientWidth: w, clientHeight: h } = canvas.parentElement;
   if (!w || !h) return;
   renderer.setSize(w, h, false);
+  requestRender();
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }).observe(canvas.parentElement);
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+// render on demand only: a big model redrawn every frame drains batteries (and stalls software GL)
+let renderQueued = false;
+function requestRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    if ($("viewer").dataset.tab !== "3d") return;
+    if (controls.update()) requestRender();   // still easing (damping)
+    renderer.render(scene, camera);
+  });
+}
+controls.addEventListener("change", requestRender);
 
 function fitCamera() {
   if (!model) return;
@@ -397,6 +457,7 @@ function showModel(m, reframe = true) {
   mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
   mesh.position.set(-m.stats.width / 2, -m.stats.depth / 2, 0);   // don't move the vertices: they're also the STL
   scene.add(mesh);
+  requestRender();
   $("tabs").querySelector('[data-tab="3d"]').disabled = false;
   $("viewer").classList.add("has-model");
   if (reframe) fitCamera();
