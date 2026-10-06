@@ -24,7 +24,7 @@ const SLIDERS = {
     { key: "trailWidth", label: "Width", unit: "mm", min: 0.6, max: 5, step: 0.1 },
   ],
   "marker-controls": [
-    { key: "markerSize", label: "Marker size", unit: "mm", min: 3, max: 15, step: 0.5 },
+    { key: "markerSize", label: "Marker size", unit: "mm", min: 1, max: 15, step: 0.5 },
     { key: "markerHeight", label: "Marker height", unit: "mm", min: 0.5, max: 6, step: 0.5, help: "Above the highest ground under it" },
   ],
   "advanced-controls": [
