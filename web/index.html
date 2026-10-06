@@ -87,6 +87,20 @@
         <div id="trail-controls"></div>
       </section>
 
+      <section class="card">
+        <h2>5 &middot; Start &amp; finish</h2>
+        <div class="field">
+          <span class="label">Start marker</span>
+          <div class="seg icons" id="start-marker" role="radiogroup" aria-label="Start marker"></div>
+        </div>
+        <div class="field">
+          <span class="label">Finish marker</span>
+          <div class="seg icons" id="end-marker" role="radiogroup" aria-label="Finish marker"></div>
+        </div>
+        <div id="marker-controls"></div>
+        <p class="area-note">Markers turn to face the direction of travel.</p>
+      </section>
+
       <details class="card advanced">
         <summary>Advanced</summary>
         <div id="advanced-controls"></div>
@@ -122,7 +136,7 @@
             <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4"/></svg>
           </button>
         </div>
-        <div class="legend"><span class="sw trail"></span>route <span class="hint-drag">&middot; drag to rotate, scroll to zoom</span></div>
+        <div class="legend"><span class="sw trail"></span>route <span class="sw start"></span>start <span class="sw end"></span>finish <span class="hint-drag">&middot; drag to rotate, scroll to zoom</span></div>
       </div>
       <div class="result" id="result" hidden>
         <dl class="stats" id="stats"></dl>

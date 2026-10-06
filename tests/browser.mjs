@@ -91,12 +91,23 @@ async function run(name, { width, height, dark }) {
     if (files.length) {
       const size = (await stat(join(dl, files[0]))).size;
       console.log(`${name}: downloaded ${files[0]} (${size.toLocaleString()} bytes)`);
-      if (size !== 84 + 50 * 452004) fail(`${name}: unexpected STL size`);
+      const tris = await page.$eval("#stats", (e) => +/TRIANGLES\s+([\d,]+)/i.exec(e.innerText)[1].replace(/,/g, ""));
+      if (size !== 84 + 50 * tris) fail(`${name}: STL size ${size} doesn't match ${tris} triangles`);
       break;
     }
     if (i === 49) fail(`${name}: no download`);
     await sleep(200);
   }
+
+  // both markers off -> exactly the reference model
+  await click('#start-marker [data-v="none"]');
+  await click('#end-marker [data-v="none"]');
+  const plain = await build("no markers");
+  if (!/TRIANGLES 452,004/.test(plain)) fail(`${name}: without markers expected the reference model, got ${plain}`);
+  await click('#start-marker [data-v="star"]');
+  await click('#end-marker [data-v="circle"]');
+  await build("star + circle markers");
+  await page.screenshot({ path: join(shots, `${name}-markers.png`) });
 
   // change a setting -> rebuild via "Update model"
   await click('#trail-style [data-v="groove"]');

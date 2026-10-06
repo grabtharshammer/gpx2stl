@@ -3,6 +3,7 @@
 import { TILE, lonLatToTile } from "./tiles.js";
 import { gaussianBlur, distanceTransform } from "./filters.js";
 import { outline } from "./footprint.js";
+import { markerPolygon, inPolygon } from "./markers.js";
 
 const EARTH_R = 6371008.8;
 const MAX_TILES = 400;
@@ -19,6 +20,10 @@ export const DEFAULTS = {
   cornerRadius: 10,   // mm; 0 for square
   shape: "rect",      // footprint: "rect" or "hex" (hexagon inscribed in the area)
   smooth: 0.8,        // terrain blur, grid cells
+  startMarker: "none", // marker shape at the start / finish (see markers.js)
+  endMarker: "none",
+  markerSize: 6,      // mm across
+  markerHeight: 2,    // mm above the highest terrain under the marker
   zoom: null,         // tile zoom; null = choose from cell size
 };
 
@@ -196,21 +201,49 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
     tri(per[j], bj, bk); tri(per[j], bk, per[k]); tri(bk, bj, ci);
   }
 
+  // start/finish markers, facing the direction of travel
+  const markers = [];
+  const markerAt = (kind, shape, pts) => {
+    if (!shape || shape === "none") return;
+    const [px, py] = pts[0], reach = o.markerSize / sc;          // look one marker-width along
+    let [hx, hy] = pts[Math.min(1, pts.length - 1)];
+    for (const q of pts) if (Math.hypot(q[0] - px, q[1] - py) >= reach) { [hx, hy] = q; break; }
+    const cx = (px - xmin) * sc, cy = (py - ymin) * sc;           // mm in model space
+    if (cx < 0 || cx > W || cy < 0 || cy > D) return;              // cropped away
+    // pts runs away from the marker: forwards from the start, backwards from the finish
+    const heading = kind === 3 ? Math.atan2(py - hy, px - hx) : Math.atan2(hy - py, hx - px);
+    const poly = markerPolygon(shape, o.markerSize, heading).map(([x, y]) => [cx + x, cy + y]);
+    let top = 0;
+    const rad = o.markerSize / 2 / cell;
+    for (let j = Math.max(0, Math.floor(cy / cell - rad)); j <= Math.min(ny - 1, Math.ceil(cy / cell + rad)); j++)
+      for (let i = Math.max(0, Math.floor(cx / cell - rad)); i <= Math.min(nx - 1, Math.ceil(cx / cell + rad)); i++)
+        if (Math.hypot(i - cx / cell, j - cy / cell) <= rad + 1) top = Math.max(top, Zt[j * nx + i]);
+    markers.push({ kind, poly, cx, cy, top: top + o.markerHeight });
+  };
+  const first = segments[0].map(plan.toM), last = segments.at(-1).map(plan.toM).reverse();
+  markerAt(2, o.startMarker, first);
+  markerAt(3, o.endMarker, last);
+  const ztop = Math.max(zmax, ...markers.map((m) => m.top));
+
   progress("solid", 0);
   const { Manifold, Mesh, CrossSection } = manifold;
   const trash = [];
   const keep = (x) => (trash.push(x), x);
   try {
     let solid = keep(new Manifold(new Mesh({ numProp: 3, vertProperties: V, triVerts: F })));
+    for (const m of markers) {
+      const cs = keep(keep(new CrossSection([m.poly])).intersect(keep(CrossSection.square([W, D]))));
+      solid = keep(solid.add(keep(Manifold.extrude(cs, m.top))));
+    }
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
     if (o.shape === "hex") {
       let cs = keep(new CrossSection([outline("hex", W, D)]));
       if (r > 0) cs = keep(keep(cs.offset(-r, "Miter")).offset(r, "Round", 2, 96));
-      solid = keep(solid.intersect(keep(Manifold.extrude(cs, zmax + 10))));
+      solid = keep(solid.intersect(keep(Manifold.extrude(cs, ztop + 10))));
     } else if (r > 0) {
       const sq = keep(keep(CrossSection.square([W - 2 * r, D - 2 * r])).translate([r, r]));
       const cs = keep(sq.offset(r, "Round", 2, 96));
-      solid = keep(solid.intersect(keep(Manifold.extrude(cs, zmax + 10))));
+      solid = keep(solid.intersect(keep(Manifold.extrude(cs, ztop + 10))));
     }
     const status = solid.status();
     if (status !== "NoError" || solid.isEmpty()) throw new Error(`Mesh is not a valid solid (${status})`);
@@ -226,12 +259,16 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         const g = clip(Math.round(y / cell), ny - 1) * nx + clip(Math.round(x / cell), nx - 1);
         trail[v] = Math.abs(bump[g]) > 0.5 * bmax ? 1 : 0;
       }
+      for (const m of markers) {            // 2 = start marker, 3 = finish marker
+        const k = 1.04, mx = m.cx + (x - m.cx) / k, my = m.cy + (y - m.cy) / k;   // slightly generous
+        if (zz > 0.01 && inPolygon(m.poly, mx, my)) trail[v] = m.kind;
+      }
     }
     const indices = new Uint32Array(mesh.triVerts);
     return {
       positions, indices, trail,
       stats: {
-        width: W, depth: D, height: zmax,
+        width: W, depth: D, height: ztop,
         scale: 1000 / sc, zExag: o.zExag,
         elevMin: emin, elevMax: emax, zoom: z, tiles: plan.tiles.count,
         triangles: indices.length / 3, volume: solid.volume() / 1000,   // cm3

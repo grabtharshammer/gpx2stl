@@ -36,6 +36,13 @@ as the reference implementation.
   ridge along the edge).
 - Map: Leaflet 1.9.4 ESM + OpenTopoMap tiles (needs attribution; fine for hobby traffic).
 
+## Markers (core/markers.js)
+`startMarker` / `endMarker` (engine default "none", UI default triangle / square): the shape's
+outline (CCW polygon, `markerPolygon`) is rotated to the direction of travel, clipped to the grid,
+extruded from z=0 to (highest terrain under it + markerHeight) and unioned with the terrain
+before the footprint cut. In the returned `trail` array, 2 = start and 3 = finish vertices (for
+the preview colours). With both markers off the model is still byte-identical to the reference.
+
 ## Reference output / regression
 Defaults on `web/examples/whole_enchilada.gpx`: 180.0 x 111.9 x 32.2 mm, 1:173,067, elevation
 1208–3733 m, zoom 12, 452,004 triangles, 255 cm3. The JS engine matches the Python output exactly

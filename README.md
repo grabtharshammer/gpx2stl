@@ -30,6 +30,8 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 | Detail | Standard (0.3 mm grid) | Draft 0.5 mm, Fine 0.2 mm. Finer = bigger file |
 | Trail style | Raised ridge | Or a carved groove |
 | Trail height/depth, width | 1.0 mm, 1.6 mm | |
+| Start / finish marker | Triangle / Square | None, Triangle, Circle, Square, Star or Hexagon; raised solids that face the direction of travel (the triangle points the way) |
+| Marker size, height | 6 mm, 2 mm | Height is above the highest ground under the marker |
 | Base thickness | 3 mm | Under the lowest point |
 | Corner radius | 10 mm | 0 for square corners |
 | Terrain smoothing | 0.8 | Blur in grid cells |

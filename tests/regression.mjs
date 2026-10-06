@@ -83,4 +83,16 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
   if (Math.abs(xmax - hs.width) > 0.05) { bad++; console.log("MISMATCH hexagon does not reach the box edge"); }
   console.log(bad ? "FAILED" : "OK: hexagon");
 }
+// Markers: both present (coloured vertices), valid solid, standing above the terrain.
+{
+  const mm = await buildModel(gpx.segments, { startMarker: "triangle", endMarker: "star" }, { getTile, manifold: wasm });
+  const count = [0, 0, 0, 0];
+  for (const t of mm.trail) count[t]++;
+  console.log(`markers: start ${count[2]} / finish ${count[3]} vertices, height ${mm.stats.height.toFixed(1)} mm, ` +
+              `${mm.stats.triangles.toLocaleString("en")} triangles, ${mm.stats.volume.toFixed(1)} cm3`);
+  if (!count[2] || !count[3]) { bad++; console.log("MISMATCH a marker is missing"); }
+  if (!(mm.stats.volume > s.volume)) { bad++; console.log("MISMATCH markers added no volume"); }
+  if (out) await writeFile(out.replace(/\.stl$/, "-markers.stl"), Buffer.from(writeStl(mm.positions, mm.indices, "markers")));
+  console.log(bad ? "FAILED" : "OK: markers");
+}
 process.exit(bad ? 1 : 0);

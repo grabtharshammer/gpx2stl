@@ -5,6 +5,7 @@ import { DEFAULTS, planGrid, routeFrame } from "./core/model.js";
 import { writeStl } from "./core/stl.js";
 import { FootprintMap } from "./mapview.js";
 import { outline, roundedOutline, insidePolygon, fitHexagon } from "./core/footprint.js";
+import { MARKER_SHAPES, markerPolygon } from "./core/markers.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "gpx2stl-settings-v1";
@@ -22,6 +23,10 @@ const SLIDERS = {
     { key: "trailDepth", label: "Height", unit: "mm", min: 0.2, max: 3, step: 0.1 },
     { key: "trailWidth", label: "Width", unit: "mm", min: 0.6, max: 5, step: 0.1 },
   ],
+  "marker-controls": [
+    { key: "markerSize", label: "Marker size", unit: "mm", min: 3, max: 15, step: 0.5 },
+    { key: "markerHeight", label: "Marker height", unit: "mm", min: 0.5, max: 6, step: 0.5, help: "Above the highest ground under it" },
+  ],
   "advanced-controls": [
     { key: "base", label: "Base thickness", unit: "mm", min: 1, max: 15, step: 0.5, help: "Under the lowest point" },
     { key: "cornerRadius", label: "Corner radius", unit: "mm", min: 0, max: 40, step: 1, help: "0 for square corners" },
@@ -32,6 +37,7 @@ const UI_DEFAULTS = {
   shape: "fit", size: DEFAULTS.size, zExag: DEFAULTS.zExag, marginKm: DEFAULTS.marginKm, cell: DEFAULTS.cell,
   trailStyle: "raised", trailDepth: Math.abs(DEFAULTS.trailHeight), trailWidth: DEFAULTS.trailWidth,
   base: DEFAULTS.base, cornerRadius: DEFAULTS.cornerRadius, smooth: DEFAULTS.smooth,
+  startMarker: "triangle", endMarker: "square", markerSize: DEFAULTS.markerSize, markerHeight: DEFAULTS.markerHeight,
 };
 
 let settings = { ...UI_DEFAULTS };
@@ -44,6 +50,8 @@ const engineOpts = () => ({
   trailWidth: settings.trailWidth, base: settings.base, cornerRadius: settings.cornerRadius, smooth: settings.smooth,
   area: engineArea(),
   shape: footprintShape(),
+  startMarker: settings.startMarker, endMarker: settings.endMarker,
+  markerSize: settings.markerSize, markerHeight: settings.markerHeight,
 });
 
 const inputs = {};
@@ -73,6 +81,16 @@ for (const [container, defs] of Object.entries(SLIDERS)) {
   }
 }
 
+// marker shape pickers: icons drawn from the same outlines the engine prints
+for (const id of ["start-marker", "end-marker"]) {
+  $(id).innerHTML = MARKER_SHAPES.map((m) => {
+    if (m === "none") return `<button type="button" data-v="none" title="No marker">None</button>`;
+    const d = markerPolygon(m, 18, Math.PI / 2).map(([x, y], i) => `${i ? "L" : "M"}${(x + 10).toFixed(2)} ${(10 - y).toFixed(2)}`).join("") + "Z";
+    return `<button type="button" data-v="${m}" title="${m[0].toUpperCase() + m.slice(1)}" aria-label="${m}">` +
+           `<svg viewBox="0 0 20 20"><path d="${d}"/></svg></button>`;
+  }).join("");
+}
+
 function bindSeg(id, key, parse = (v) => v) {
   const btns = [...$(id).querySelectorAll("button")];
   const sync = () => btns.forEach((b) => b.setAttribute("aria-checked", parse(b.dataset.v) === settings[key]));
@@ -89,7 +107,8 @@ $("shape").addEventListener("click", (e) => {
 }, true);
 // bubble phase: after the new shape is applied, bring the whole box into view
 $("shape").addEventListener("click", () => frame && fpMap.fit());
-const segSyncs = [bindSeg("detail", "cell", parseFloat), bindSeg("trail-style", "trailStyle"), bindSeg("shape", "shape")];
+const segSyncs = [bindSeg("detail", "cell", parseFloat), bindSeg("trail-style", "trailStyle"), bindSeg("shape", "shape"),
+                  bindSeg("start-marker", "startMarker"), bindSeg("end-marker", "endMarker")];
 
 function syncControls() {
   for (const [k, set] of Object.entries(inputs)) set(settings[k]);
@@ -370,9 +389,10 @@ function showModel(m, reframe = true) {
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
   g.setIndex(new THREE.BufferAttribute(m.indices, 1));
-  const terrain = new THREE.Color(dark.matches ? 0xb9b3a4 : 0xd8d2c2), trail = new THREE.Color(css("--accent"));
+  const palette = [new THREE.Color(dark.matches ? 0xb9b3a4 : 0xd8d2c2), new THREE.Color(css("--accent")),
+                   new THREE.Color(css("--start")), new THREE.Color(css("--finish"))];   // see core/model.js
   const col = new Float32Array(m.trail.length * 3);
-  for (let i = 0; i < m.trail.length; i++) (m.trail[i] ? trail : terrain).toArray(col, i * 3);
+  for (let i = 0; i < m.trail.length; i++) palette[m.trail[i]].toArray(col, i * 3);
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
   mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
   mesh.position.set(-m.stats.width / 2, -m.stats.depth / 2, 0);   // don't move the vertices: they're also the STL
