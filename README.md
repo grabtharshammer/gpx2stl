@@ -35,7 +35,7 @@ It must be served over HTTPS (or localhost) so the elevation tile cache works.
 | Start / finish marker | Triangle / Square | None, Triangle, Circle, Square, Star or Hexagon; raised solids that face the direction of travel (the triangle points the way) |
 | Marker size, height | 6 mm, 2 mm | Height is above the highest ground under the marker |
 | Label | off | Text printed on a flat plate (top level with the highest ground under it), raised or engraved. Prefilled with the route name, distance, climb/descent, high point, and date/duration when the GPX has timestamps; edit freely. Drag it on the map; by default it sits low and central, clear of the route |
-| Letter height, lettering depth | 4 mm, 0.8 mm | With a label (or an inlay) there's also a **3MF for multi-colour printers**: one object whose parts are the terrain, the route pieces and the lettering (raised letters, or a flush fill for engraved ones), so each can get its own filament |
+| Letter height, lettering depth | 4 mm, 0.8 mm | With a label (or an inlay) there's also a **3MF for multi-colour printers**: one object whose parts are the terrain, the route pieces, the start and finish markers, and the lettering (raised letters, or a flush fill for engraved ones), so each can get its own filament. The parts don't overlap |
 | Label rotation | 0° | Slider, or drag the rotate handle above the label on the map (snaps to 15° steps when close) |
 | Base thickness | 3 mm | Under the lowest point |
 | Corner radius | 10 mm | 0 for square corners |

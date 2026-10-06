@@ -702,7 +702,7 @@ function showModel(m, reframe = true) {
   $("stats").innerHTML = stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
   $("download-size").textContent = `(${fmtMB(84 * (1 + m.inlays.length) + 50 * s.triangles)})`;
   $("download-label").textContent = m.inlays.length ? "Download parts (.zip)" : "Download STL";
-  $("download-3mf").hidden = !m.inlays.length && !m.lettering;
+  $("download-3mf").hidden = !m.parts3mf;
   $("result").hidden = false;
 }
 
@@ -755,13 +755,9 @@ $("download").addEventListener("click", () => {
 
 $("download-3mf").addEventListener("click", () => {
   if (!model) return;
-  // one object, one part per colour: terrain, route inlay pieces, label lettering
-  const terrain = model.plainTerrain ?? model;
-  saveBlob(make3mf([
-    { name: "Terrain", positions: terrain.positions, indices: terrain.indices, color: "#D8D2C2" },
-    ...model.inlays.map((q, k) => ({ name: `Route ${k + 1}`, positions: q.positions, indices: q.indices, color: "#E8590C" })),
-    ...(model.lettering ? [{ name: "Label text", ...model.lettering, color: "#2B2F28" }] : []),
-  ], route.name), `${fileBase()}.3mf`);
+  // one object, one part per colour: terrain, route pieces, start/finish markers, label lettering
+  const COLORS = { terrain: "#D8D2C2", route: "#E8590C", start: "#2F9E44", finish: "#C92A2A", lettering: "#2B2F28" };
+  saveBlob(make3mf(model.parts3mf.map((q) => ({ ...q, color: COLORS[q.role] })), route.name), `${fileBase()}.3mf`);
 });
 
 syncControls();

@@ -7,6 +7,7 @@ import { markerPolygon, inPolygon } from "./markers.js";
 import { INLAY_DEFAULTS, planPieces, bufferPolyline, abovePlane } from "./inlay.js";
 
 const EARTH_R = 6371008.8;
+const ORDER = ["terrain", "route", "start", "finish", "lettering"];   // 3MF part order
 const MAX_TILES = 400;
 const RAD = Math.PI / 180;
 
@@ -125,10 +126,10 @@ async function loadDem(plan, getTile, progress) {
  *   manifold: initialised manifold-3d wasm module (after .setup())
  * Returns { positions: Float32Array, indices: Uint32Array, trail: Uint8Array (per vertex), stats,
  *           inlays: [{ positions, indices, trail, plane, height, tilt }] (inlay mode only),
- *           lettering: { positions, indices } | null — the label text as its own body (raised
- *             letters, or the fill of engraved ones) for multi-colour 3MF,
- *           plainTerrain: { positions, indices } | null — the terrain without raised letters, when
- *             that differs from the main body (which always has them, for single-colour STL) }.
+ *           parts3mf: [{ name, role, positions, indices }] | null — the model split into one body
+ *             per colour for a multi-colour 3MF (role: terrain, route, start, finish, lettering);
+ *             the parts don't overlap. null when there's only the terrain. }
+ * The main body (positions/indices) is always the single-colour version with everything merged.
  */
 export async function buildModel(segments, opts, { getTile, manifold, progress = () => {} }) {
   const plan = planGrid(segments, opts);
@@ -246,9 +247,12 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   let lettering = null;
   try {
     let solid = keep(gridSolid(manifold, Zt, nx, cell, 0, nx - 1, 0, ny - 1));
-    for (const m of inl ? [] : markers) {        // with an inlay the markers ride on the inlay instead
+    // start/finish markers stay separate bodies until the end (their own 3MF parts); with an
+    // inlay they ride on the first and last pieces instead (see below)
+    const markerBodies = [];
+    for (const m of inl ? [] : markers) {
       const cs = keep(keep(new CrossSection([m.poly])).intersect(keep(CrossSection.square([W, D]))));
-      solid = keep(solid.add(keep(Manifold.extrude(cs, m.top))));
+      markerBodies.push({ m, solid: keep(Manifold.extrude(cs, m.top)) });
     }
     if (label) {
       const { cx, cy, width: w, height: h, top, angle } = label, pr = Math.min(1.5, w / 4, h / 4);
@@ -296,14 +300,18 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         const j0 = Math.max(0, Math.floor(bb.min[1] / cell) - pad), j1 = Math.min(ny - 1, Math.ceil(bb.max[1] / cell) + pad);
         if (i1 - i0 < 1 || j1 - j0 < 1) return;
         const surface = keep(gridSolid(manifold, Zt, nx, cell, i0, i1, j0, j1, proud));
-        let piece = keep(keep(keep(Manifold.extrude(inner, ztop + 20)).trimByPlane(nrm, off)).intersect(surface));
+        const fin = keep(keep(keep(Manifold.extrude(inner, ztop + 20)).trimByPlane(nrm, off)).intersect(surface));
+        let piece = fin;
+        const own = [];
         for (const m of mk) {
           let ms = keep(new CrossSection([m.poly]));
           if (taken) ms = keep(ms.subtract(taken));
-          piece = keep(piece.add(keep(keep(Manifold.extrude(ms, m.top)).trimByPlane(nrm, off))));
+          const body = keep(keep(Manifold.extrude(ms, m.top)).trimByPlane(nrm, off));
+          own.push({ m, solid: body });
+          piece = keep(piece.add(body));
         }
         taken = taken ? keep(taken.add(outer)) : outer;
-        pieces.push({ solid: piece, plane: pc.plane, height: pc.height, tilt: pc.tilt, markers: mk });
+        pieces.push({ solid: piece, fin, markerBodies: own, plane: pc.plane, height: pc.height, tilt: pc.tilt, markers: mk });
       });
       if (cuts.length) {
         const cut = keep(Manifold.union(cuts));
@@ -328,7 +336,19 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
     if (lettering && footprint) lettering = keep(lettering.intersect(footprint));
     if (lettering?.isEmpty()) lettering = null;
     // single-colour body: raised letters merged in (engraved ones are just the empty pocket)
-    const plain = solid;
+    const plain = solid;                       // terrain alone, for the 3MF
+    const parts = [];                          // [name, role, manifold] for the 3MF
+    for (const b of markerBodies) {
+      const ms = footprint ? keep(b.solid.intersect(footprint)) : b.solid;
+      if (ms.isEmpty()) continue;
+      solid = keep(solid.add(ms));             // single-colour body
+      // the part is only what stands above the ground, so it doesn't overlap the terrain part
+      const reach = o.markerSize / 2 + 2 * cell;
+      const i0 = Math.max(0, Math.floor((b.m.cx - reach) / cell)), i1 = Math.min(nx - 1, Math.ceil((b.m.cx + reach) / cell));
+      const j0 = Math.max(0, Math.floor((b.m.cy - reach) / cell)), j1 = Math.min(ny - 1, Math.ceil((b.m.cy + reach) / cell));
+      const above = keep(ms.subtract(keep(gridSolid(manifold, Zt, nx, cell, i0, i1, j0, j1))));
+      if (!above.isEmpty()) parts.push([b.m.kind === 2 ? "Start marker" : "Finish marker", b.m.kind === 2 ? "start" : "finish", above]);
+    }
     if (lettering && label.style !== "engraved") solid = keep(solid.add(lettering));
     const status = solid.status();
     if (status !== "NoError" || solid.isEmpty()) throw new Error(`Mesh is not a valid solid (${status})`);
@@ -363,6 +383,14 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
     for (const pc of pieces) {
       const ps = footprint ? keep(pc.solid.intersect(footprint)) : pc.solid;
       if (ps.isEmpty()) continue;
+      // 3MF: the route piece without its marker, and the marker on its own
+      let fin = footprint ? keep(pc.fin.intersect(footprint)) : pc.fin;
+      for (const b of pc.markerBodies) {
+        const ms = footprint ? keep(b.solid.intersect(footprint)) : b.solid;
+        fin = keep(fin.subtract(ms));
+        if (!ms.isEmpty()) parts.push([b.m.kind === 2 ? "Start marker" : "Finish marker", b.m.kind === 2 ? "start" : "finish", ms]);
+      }
+      if (!fin.isEmpty()) parts.push([`Route ${inlays.length + 1}`, "route", fin]);
       if (ps.status() !== "NoError") throw new Error(`Inlay is not a valid solid (${ps.status()})`);
       const g = ps.getMesh(), gp = g.numProp, gv = g.vertProperties, n = gv.length / gp;
       const pos = new Float32Array(n * 3), col = new Uint8Array(n).fill(1);
@@ -387,8 +415,11 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
     };
     return {
       positions, indices, trail, inlays,
-      lettering: lettering && plainMesh(lettering),
-      plainTerrain: plain !== solid ? plainMesh(plain) : null,
+      parts3mf: parts.length || lettering
+        ? [["Terrain", "terrain", plain], ...parts.sort((a, b) => ORDER.indexOf(a[1]) - ORDER.indexOf(b[1])),
+           ...(lettering ? [["Label text", "lettering", lettering]] : [])]
+            .map(([name, role, m]) => ({ name, role, ...plainMesh(m) }))
+        : null,
       stats: {
         width: W, depth: D, height: ztop,
         scale: 1000 / sc, zExag: o.zExag, base: o.base,

@@ -36,6 +36,20 @@ async function getTile(z, x, y) {
 
 const wasm = await Module();
 wasm.setup();
+
+// The multi-colour 3MF parts must not overlap the terrain and must add up to the whole model.
+const toManifold = (q) => new wasm.Manifold(new wasm.Mesh({ numProp: 3, vertProperties: q.positions, triVerts: q.indices }));
+function checkParts(what, m, extra = 0) {
+  if (!m.parts3mf) { console.log(`  MISMATCH ${what}: no 3MF parts`); return 1; }
+  const P = m.parts3mf.map((q) => ({ ...q, man: toManifold(q) }));
+  const total = P.reduce((v, q) => v + q.man.volume(), 0), whole = toManifold(m).volume() + extra;
+  let overlap = 0;
+  for (const q of P.slice(1)) overlap += P[0].man.intersect(q.man).volume();
+  console.log(`  3MF parts (${what}): ${P.map((q) => q.name).join(", ")}; total ${(total / 1000).toFixed(3)} cm3 ` +
+              `vs model ${(whole / 1000).toFixed(3)} cm3; overlap with terrain ${overlap.toFixed(3)} mm3`);
+  if (overlap > 0.5 || Math.abs(total - whole) > 1) { console.log(`  MISMATCH ${what}: parts overlap or don't add up`); return 1; }
+  return 0;
+}
 const gpx = parseGpx(await readFile(join(here, "../web/examples/whole_enchilada.gpx"), "utf8"));
 const t0 = performance.now();
 const m = await buildModel(gpx.segments, {}, { getTile, manifold: wasm });
@@ -96,6 +110,8 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
               `${mm.stats.triangles.toLocaleString("en")} triangles, ${mm.stats.volume.toFixed(1)} cm3`);
   if (!count[2] || !count[3]) { bad++; console.log("MISMATCH a marker is missing"); }
   if (!(mm.stats.volume > s.volume)) { bad++; console.log("MISMATCH markers added no volume"); }
+  bad += checkParts("markers", mm);
+  if (mm.parts3mf?.filter((q) => q.role === "start" || q.role === "finish").length !== 2) { bad++; console.log("MISMATCH marker parts missing"); }
   if (out) await writeFile(out.replace(/\.stl$/, "-markers.stl"), Buffer.from(writeStl(mm.positions, mm.indices, "markers")));
   console.log(bad ? "FAILED" : "OK: markers");
 }
@@ -126,16 +142,9 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
     console.log(`label ${style} ${angle}°: ${t.width.toFixed(1)} x ${t.height.toFixed(1)} mm text, ${t.contours.length} contours; ` +
                 `plate ${count[4]} / lettering ${count[5]} vertices; ${lm.stats.triangles.toLocaleString("en")} triangles`);
     if (!count[4] || !count[5]) { bad++; console.log(`MISMATCH label ${style} missing parts`); }
-    // lettering as its own body (for multi-colour 3MF): raised = on top of the plain terrain,
-    // engraved = fills the pocket; either way terrain + lettering adds up to the solid model
-    const vol = (q) => new wasm.Manifold(new wasm.Mesh({ numProp: 3, vertProperties: q.positions, triVerts: q.indices })).volume();
-    const letters = lm.lettering ? vol(lm.lettering) : 0, main = vol(lm);
-    const plainV = lm.plainTerrain ? vol(lm.plainTerrain) : main;
-    const sum = style === "engraved" ? main + letters : plainV + letters;
-    console.log(`  lettering body ${(letters).toFixed(1)} mm3; terrain + lettering ${(sum / 1000).toFixed(3)} vs ` +
-                `${style === "engraved" ? "solid plate" : "merged"} ${(style === "engraved" ? (main + letters) / 1000 : main / 1000).toFixed(3)} cm3`);
-    if (!(letters > 1)) { bad++; console.log(`MISMATCH no lettering body for ${style}`); }
-    if (style !== "engraved" && Math.abs(plainV + letters - main) > 1) { bad++; console.log("MISMATCH raised lettering doesn't add up"); }
+    // engraved letters' fill isn't in the single-colour model (that has the empty pocket)
+    const fill = style === "engraved" ? toManifold(lm.parts3mf.find((q) => q.role === "lettering")).volume() : 0;
+    bad += checkParts(`label ${style}`, lm, fill);
     if (out) await writeFile(out.replace(/[.]stl$/, `-label-${style}-${angle}.stl`), Buffer.from(writeStl(lm.positions, lm.indices, "label")));
   }
   const prof = await routeProfile(gpx.segments, getTile);
@@ -166,6 +175,7 @@ console.log(bad ? `${bad} mismatches` : "OK: matches Python reference");
     if (out) writeFile(out.replace(/[.]stl$/, `-inlay-${k + 1}.stl`), Buffer.from(writeStl(flat, q.indices, `inlay ${k + 1}`)));
   });
   if (out) await writeFile(out.replace(/[.]stl$/, "-inlay-terrain.stl"), Buffer.from(writeStl(im.positions, im.indices, "terrain")));
+  bad += checkParts("inlay", im, im.inlays.reduce((v, q) => v + toManifold(q.positions, q.indices).volume(), 0));   // local toManifold(pos, idx)
   console.log(bad ? "FAILED" : "OK: inlay");
 }
 process.exit(bad ? 1 : 0);
