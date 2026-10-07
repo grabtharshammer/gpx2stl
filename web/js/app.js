@@ -100,11 +100,11 @@ for (const [container, defs] of Object.entries(SLIDERS)) {
     const el = document.createElement("div");
     el.className = "field";
     el.innerHTML = `
-      <div class="row"><label class="label" for="r-${d.key}">${d.label}</label>
+      <label class="label" for="r-${d.key}">${d.label}</label>
+      <div class="slide"><input type="range" id="r-${d.key}" min="${d.min}" max="${d.max}" step="${d.step}">
         <span class="val"><input type="number" min="${d.min}" max="${d.max}" step="${d.step}" aria-label="${d.label}">${d.unit}</span></div>
-      <input type="range" id="r-${d.key}" min="${d.min}" max="${d.max}" step="${d.step}">
       ${d.help ? `<span class="help">${d.help}</span>` : ""}`;
-    const [num, range] = el.querySelectorAll("input");
+    const [range, num] = el.querySelectorAll("input");
     const set = (v, from) => {
       v = parseFloat(v);
       if (!Number.isFinite(v)) return;

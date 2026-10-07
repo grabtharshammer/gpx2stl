@@ -76,10 +76,13 @@ svg { display: block; }
 
 .field { display: grid; gap: 6px; margin-top: 12px; }
 .field:first-child { margin-top: 0; }
+.field + [id$="-controls"] { margin-top: 12px; }
 .field .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .label { font-weight: 550; }
 .field .help { color: var(--muted); font-size: 13px; }
-.val { display: flex; align-items: baseline; gap: 4px; color: var(--muted); font-size: 13px; }
+.slide { display: flex; align-items: center; gap: 12px; }
+.slide input[type=range] { flex: 1; min-width: 0; }
+.val { flex: none; display: flex; align-items: baseline; gap: 4px; color: var(--muted); font-size: 13px; }
 .val input { width: 64px; text-align: right; font: inherit; font-size: 14px; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
 
