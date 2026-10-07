@@ -86,6 +86,18 @@ piece. Base is raised to depth + minFloor + 1.5 mm. Exports: zip (terrain + `lay
 README) and 3MF (assembled objects). Meshes use `mergedTris` so indexed exports are closed.
 Whole Enchilada at defaults: 3 pieces (single flat floor would need ~28 mm fins).
 
+## Flat prints (core/contours.js, core/flat.js)
+`printStyle: "contours" | "terraced"` branches off in buildModel once the elevation grid exists
+(no heightfield solid). contours.js: `autoInterval` (finest round interval in m or ft with <3% of
+the map's contour spacing under 1.2 mm), `traceLevel` (marching squares; `closed` pads with
+-Infinity so loops close, for filled regions with the EvenOdd rule), `smoothLine` (Chaikin +
+Douglas-Peucker; loops are split at their farthest point first or DP collapses them). flat.js:
+plate + lines (minor dropped where spacing < 1.2 mm; every 5th is index), or nested terrace
+prisms (each level intersected with the one below); route, markers, label on top. Lower parts
+are trimmed in 2D so the 3MF parts are disjoint; the single-colour body is a union of "grounded"
+versions extruded from the bed (unioning solids that only touch can leave separate shells).
+Preview colours come from the parts (role -> colour). Stats give filament-swap heights.
+
 ## Performance (measured on the Pi 5, ~4x slower than a laptop)
 - Builds: 85-95% is the manifold "solid" stage. Building the terrain Manifold (~0.5M tris) is
   ~1.2 s; every boolean with the whole terrain is another ~1 s pass. So small bodies are batched:

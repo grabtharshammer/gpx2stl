@@ -2,9 +2,10 @@
 // Grew out of a Python script; the default output must keep matching its reference model (tests/).
 import { TILE, lonLatToTile } from "./tiles.js";
 import { gaussianBlur, distanceTransform } from "./filters.js";
-import { outline } from "./footprint.js";
-import { markerPolygon, inPolygon } from "./markers.js";
+import { inPolygon } from "./markers.js";
 import { INLAY_DEFAULTS, planPieces, bufferPolyline, abovePlane } from "./inlay.js";
+import { gridSolid, mergedTris, meshOut, footprintSection, markerOutlines, labelFrame, labelSections } from "./solids.js";
+import { buildFlat } from "./flat.js";
 
 const EARTH_R = 6371008.8;
 const ORDER = ["terrain", "route", "start", "finish", "lettering"];   // 3MF part order
@@ -34,6 +35,10 @@ export const DEFAULTS = {
   // { clearance, depth, maxHeight, minFloor, maxTilt }. trailHeight is then how far the inlay
   // stands above the terrain (>= 0) and trailWidth its width.
   inlay: null,
+  // "relief" (the terrain itself), or a quick flat print: "contours" (lines on a plate) or
+  // "terraced" (stacked steps); settings for those in contours (see flat.js FLAT_DEFAULTS)
+  printStyle: "relief",
+  contours: null,
   zoom: null,         // tile zoom; null = choose from cell size
   origin: null,       // { lat, lon } projection centre; null = mean of the route points
 };
@@ -164,6 +169,8 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   if (o.smooth > 0) gaussianBlur(elev, nx, ny, o.smooth);
   let emin = Infinity, emax = -Infinity;
   for (const e of elev) { emin = Math.min(emin, e); emax = Math.max(emax, e); }
+  if (o.printStyle === "contours" || o.printStyle === "terraced")
+    return buildFlat({ segments, plan, elev, emin, emax, manifold, progress });
 
   // route: distance from the rasterised track, turned into a tapered bump (not with an inlay)
   progress("route", 0);
@@ -198,43 +205,27 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   progress("mesh", 0);
   const W = (nx - 1) * cell, D = (ny - 1) * cell;
 
-  // start/finish markers, facing the direction of travel
-  const markers = [];
-  const markerAt = (kind, shape, pts) => {
-    if (!shape || shape === "none") return;
-    const [px, py] = pts[0], reach = o.markerSize / sc;          // look one marker-width along
-    let [hx, hy] = pts[Math.min(1, pts.length - 1)];
-    for (const q of pts) if (Math.hypot(q[0] - px, q[1] - py) >= reach) { [hx, hy] = q; break; }
-    const cx = (px - xmin) * sc, cy = (py - ymin) * sc;           // mm in model space
-    if (cx < 0 || cx > W || cy < 0 || cy > D) return;              // cropped away
-    // pts runs away from the marker: forwards from the start, backwards from the finish
-    const heading = kind === 3 ? Math.atan2(py - hy, px - hx) : Math.atan2(hy - py, hx - px);
-    const poly = markerPolygon(shape, o.markerSize, heading).map(([x, y]) => [cx + x, cy + y]);
+  // start/finish markers, facing the direction of travel, standing above the highest ground under them
+  const toMM = (p) => { const [x, y] = plan.toM(p); return [(x - xmin) * sc, (y - ymin) * sc]; };
+  const markers = markerOutlines(segments, toMM, o, W, D).map((m) => {
     let top = 0;
     const rad = o.markerSize / 2 / cell;
-    for (let j = Math.max(0, Math.floor(cy / cell - rad)); j <= Math.min(ny - 1, Math.ceil(cy / cell + rad)); j++)
-      for (let i = Math.max(0, Math.floor(cx / cell - rad)); i <= Math.min(nx - 1, Math.ceil(cx / cell + rad)); i++)
-        if (Math.hypot(i - cx / cell, j - cy / cell) <= rad + 1) top = Math.max(top, Zt[j * nx + i]);
-    markers.push({ kind, poly, cx, cy, top: top + o.markerHeight });
-  };
-  const first = segments[0].map(plan.toM), last = segments.at(-1).map(plan.toM).reverse();   // metres
-  markerAt(2, o.startMarker, first);
-  markerAt(3, o.endMarker, last);
+    for (let j = Math.max(0, Math.floor(m.cy / cell - rad)); j <= Math.min(ny - 1, Math.ceil(m.cy / cell + rad)); j++)
+      for (let i = Math.max(0, Math.floor(m.cx / cell - rad)); i <= Math.min(nx - 1, Math.ceil(m.cx / cell + rad)); i++)
+        if (Math.hypot(i - m.cx / cell, j - m.cy / cell) <= rad + 1) top = Math.max(top, Zt[j * nx + i]);
+    return { ...m, top: top + o.markerHeight };
+  });
   // label plate: flat top level with the highest ground under it
   let label = null;
   if (o.label?.contours?.length) {
-    const L = o.label, [lx, ly] = plan.toM([L.center.lat, L.center.lon]);
-    const cx = (lx - xmin) * sc, cy = (ly - ymin) * sc, hw = L.width / 2, hh = L.height / 2;
-    const a = ((L.angle ?? 0) * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
-    const local = (x, y) => [(x - cx) * ca + (y - cy) * sa, -(x - cx) * sa + (y - cy) * ca];   // into the plate's frame
-    const bw = Math.abs(hw * ca) + Math.abs(hh * sa), bh = Math.abs(hw * sa) + Math.abs(hh * ca);
+    const f = labelFrame(o.label, toMM);
     let top = 0;
-    for (let j = Math.max(0, Math.floor((cy - bh) / cell)); j <= Math.min(ny - 1, Math.ceil((cy + bh) / cell)); j++)
-      for (let i = Math.max(0, Math.floor((cx - bw) / cell)); i <= Math.min(nx - 1, Math.ceil((cx + bw) / cell)); i++) {
-        const [u, v] = local(i * cell, j * cell);
-        if (Math.abs(u) <= hw + cell && Math.abs(v) <= hh + cell) top = Math.max(top, Zt[j * nx + i]);
+    for (let j = Math.max(0, Math.floor((f.cy - f.bh) / cell)); j <= Math.min(ny - 1, Math.ceil((f.cy + f.bh) / cell)); j++)
+      for (let i = Math.max(0, Math.floor((f.cx - f.bw) / cell)); i <= Math.min(nx - 1, Math.ceil((f.cx + f.bw) / cell)); i++) {
+        const [u, v] = f.local(i * cell, j * cell);
+        if (Math.abs(u) <= f.hw + cell && Math.abs(v) <= f.hh + cell) top = Math.max(top, Zt[j * nx + i]);
       }
-    if (top > 0) label = { ...L, angle: L.angle ?? 0, cx, cy, local, top: top + 0.2 };   // 0.2 mm proud so the edge reads
+    if (top > 0) label = { ...f, top: top + 0.2 };   // 0.2 mm proud so the edge reads
   }
   const proud = inl ? Math.max(0, o.trailHeight) : 0;
   const ztop = Math.max(zmax + proud, ...markers.map((m) => m.top),
@@ -262,11 +253,8 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       markerBodies.push({ m, solid: keep(Manifold.extrude(cs, m.top)) });
     }
     if (label) {
-      const { cx, cy, width: w, height: h, top, angle } = label, pr = Math.min(1.5, w / 4, h / 4);
-      const place = (cs) => keep(keep(keep(cs.rotate(angle)).translate([cx, cy])).intersect(keep(CrossSection.square([W, D]))));
-      const plate = place(keep(keep(CrossSection.square([w - 2 * pr, h - 2 * pr], true)).offset(pr, "Round", 2, 32)));
+      const { top } = label, { plate, text } = labelSections(CrossSection, label, W, D, keep);
       adds.push(keep(Manifold.extrude(plate, top)));
-      const text = place(keep(new CrossSection(label.contours, "NonZero")));
       // the lettering stays a separate body until the end, so a 3MF can give it its own filament:
       // raised letters stand on the plate; engraved ones get a fill that is flush with it
       if (label.style === "engraved") {
@@ -332,17 +320,9 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
     progress("solid", 0.5);
 
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
-    let footprint = null;
-    if (o.shape === "hex") {
-      let cs = keep(new CrossSection([outline("hex", W, D)]));
-      if (r > 0) cs = keep(keep(cs.offset(-r, "Miter")).offset(r, "Round", 2, 96));
-      footprint = keep(Manifold.extrude(cs, ztop + 10));
-    } else if (r > 0) {
-      const sq = keep(keep(CrossSection.square([W - 2 * r, D - 2 * r])).translate([r, r]));
-      footprint = keep(Manifold.extrude(keep(sq.offset(r, "Round", 2, 96)), ztop + 10));
-    } else if (pieces.length) {
-      footprint = keep(Manifold.extrude(keep(CrossSection.square([W, D])), ztop + 10));   // pieces may overhang the edge
-    }
+    // (a plain rectangle needs no cut, except to trim inlay pieces that overhang the edge)
+    const footprint = o.shape === "hex" || r > 0 || pieces.length
+      ? keep(Manifold.extrude(footprintSection(CrossSection, o.shape, W, D, r, keep), ztop + 10)) : null;
     if (footprint) solid = keep(solid.intersect(footprint));
     solid.status();
     progress("solid", 0.75);
@@ -424,17 +404,12 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       triangles += idx.length / 3;
     }
 
-    const plainMesh = (m) => {
-      const g = m.getMesh(), gp = g.numProp, gv = g.vertProperties, pos = new Float32Array((gv.length / gp) * 3);
-      for (let i = 0, k = 0; i < gv.length; i += gp, k += 3) { pos[k] = gv[i]; pos[k + 1] = gv[i + 1]; pos[k + 2] = gv[i + 2]; }
-      return { positions: pos, indices: mergedTris(g) };
-    };
     return {
       positions, indices, trail, inlays,
       parts3mf: parts.length || lettering
         ? [["Terrain", "terrain", plain], ...parts.sort((a, b) => ORDER.indexOf(a[1]) - ORDER.indexOf(b[1])),
            ...(lettering ? [["Label text", "lettering", lettering]] : [])]
-            .map(([name, role, m]) => ({ name, role, ...plainMesh(m) }))
+            .map(([name, role, m]) => ({ name, role, ...meshOut(m) }))
         : null,
       stats: {
         width: W, depth: D, height: ztop,
@@ -453,51 +428,3 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   }
 }
 
-/**
- * Watertight heightfield solid over grid cells i0..i1 x j0..j1: top surface at Z (+ dz), vertical
- * walls, and a fan-triangulated flat bottom at z = 0.
- */
-function gridSolid({ Manifold, Mesh }, Z, nx, cell, i0, i1, j0, j1, dz = 0) {
-  const gx = i1 - i0 + 1, gy = j1 - j0 + 1;
-  const per = [];
-  for (let i = 0; i < gx - 1; i++) per.push(i);                         // south edge, west->east
-  for (let j = 0; j < gy - 1; j++) per.push(j * gx + gx - 1);           // east edge, south->north
-  for (let i = gx - 1; i > 0; i--) per.push((gy - 1) * gx + i);         // north edge, east->west
-  for (let j = gy - 1; j > 0; j--) per.push(j * gx);                    // west edge, north->south
-  const nb = per.length, nTop = gx * gy, ci = nTop + nb;
-  const V = new Float32Array((nTop + nb + 1) * 3);
-  for (let j = 0, p = 0; j < gy; j++)
-    for (let i = 0; i < gx; i++, p += 3) {
-      V[p] = (i0 + i) * cell; V[p + 1] = (j0 + j) * cell; V[p + 2] = Z[(j0 + j) * nx + i0 + i] + dz;
-    }
-  per.forEach((t, k) => { V[(nTop + k) * 3] = V[t * 3]; V[(nTop + k) * 3 + 1] = V[t * 3 + 1]; });
-  V[ci * 3] = i0 * cell + ((gx - 1) * cell) / 2; V[ci * 3 + 1] = j0 * cell + ((gy - 1) * cell) / 2;
-
-  const F = new Uint32Array((2 * (gx - 1) * (gy - 1) + 3 * nb) * 3);
-  let f = 0;
-  const tri = (a, b, c) => { F[f++] = a; F[f++] = b; F[f++] = c; };
-  for (let j = 0; j < gy - 1; j++)
-    for (let i = 0; i < gx - 1; i++) {
-      const a = j * gx + i, b = a + 1, c = a + gx + 1, e = a + gx;
-      tri(a, b, c); tri(a, c, e);
-    }
-  for (let j = 0; j < nb; j++) {
-    const k = (j + 1) % nb, bj = nTop + j, bk = nTop + k;
-    tri(per[j], bj, bk); tri(per[j], bk, per[k]); tri(bk, bj, ci);
-  }
-  return new Manifold(new Mesh({ numProp: 3, vertProperties: V, triVerts: F }));
-}
-
-/**
- * Triangle indices with manifold's seam duplicates merged (mergeFromVert -> mergeToVert), so
- * indexed exports like 3MF are closed meshes. STL output is unchanged: positions are identical.
- */
-function mergedTris(mesh) {
-  const t = new Uint32Array(mesh.triVerts), from = mesh.mergeFromVert, to = mesh.mergeToVert;
-  if (from?.length) {
-    const map = new Map();
-    for (let i = 0; i < from.length; i++) map.set(from[i], to[i]);
-    for (let i = 0; i < t.length; i++) { const m = map.get(t[i]); if (m !== undefined) t[i] = m; }
-  }
-  return t;
-}

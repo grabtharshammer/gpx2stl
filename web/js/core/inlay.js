@@ -16,7 +16,7 @@ const STEP = 0.5;      // mm between samples along the route
 const MIN_PIECE = 24;  // samples (12 mm); shorter pieces are fiddly to handle
 
 /** Douglas-Peucker simplification of a polyline. */
-function simplify(pts, tol) {
+export function simplify(pts, tol) {
   if (pts.length < 3) return pts;
   const keep = new Uint8Array(pts.length);
   keep[0] = keep[pts.length - 1] = 1;

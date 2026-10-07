@@ -223,6 +223,17 @@ async function run(name, { width, height, dark }) {
   if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "custom") fail(`${name}: resizing in Fit mode didn't switch to Custom`);
   await click("#area-reset");
   if ((await page.$eval('#shape [aria-checked="true"]', (b) => b.dataset.v)) !== "fit") fail(`${name}: Reset didn't return to Fit`);
+  // flat prints: contours (with filament-change heights) and terraces
+  await click('#print-style [data-v="contours"]');
+  if (!(await page.$eval("#trail-style-field", (e) => e.hidden))) fail(`${name}: trail style still shown for a flat print`);
+  const flat = await build("flat contours");
+  if (!/CONTOURS every [\d,]+ (m|ft) \(\d+ levels\)/.test(flat) || !/CHANGE FILAMENT AT [\d.]+ mm, [\d.]+ mm/.test(flat)) fail(`${name}: flat stats: ${flat}`);
+  await page.screenshot({ path: join(shots, `${name}-model-contours.png`) });
+  await click('#print-style [data-v="terraced"]');
+  await build("terraced");
+  await page.screenshot({ path: join(shots, `${name}-model-terraced.png`) });
+  await click('#print-style [data-v="relief"]');
+
   // separate inlay: build, explode, download parts zip, 3MF and the test-fit coupon
   await click('#trail-style [data-v="inlay"]');
   const inl = await build("separate inlay");

@@ -14,6 +14,7 @@
   --finish: #c92a2a;
   --plate: #f4f0e6;
   --lettering: #2b2f28;
+  --contour: #6b4f2a;
   --radius: 12px;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light dark;
@@ -35,6 +36,7 @@
     --finish: #ff6b6b;
     --plate: #dcd5c5;
     --lettering: #1d201b;
+    --contour: #8a6a3e;
   }
 }
 
@@ -195,3 +197,6 @@ path.fp-route-full { stroke: #e8590c; stroke-opacity: .35; stroke-dasharray: 2 6
 #inlay-body { margin-top: 12px; }
 #inlay-controls { margin-top: 12px; }
 .warn-note { color: var(--danger); }
+select { width: 100%; font: inherit; font-size: 14px; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+#flat-body { margin-top: 12px; }
+#flat-controls { margin-top: 12px; }

@@ -12,6 +12,10 @@ desktop and phone browsers. Everything runs in your browser; your GPX file is ne
 
 - Builds real terrain from public elevation data around your route, with the route raised,
   carved in, or printed as a **separate inlay** in another colour.
+- Or a **quick flat print**: a thin plate with raised (or engraved) **contour lines**, or stacked
+  **terraces**, one step per contour level. A fraction of the print time and material, and with
+  raised lines you get two- or three-colour prints on any printer by changing filament at the
+  heights the app gives you.
 - **Print area on a topo map**: fit the route, or pick square, 3:2, hexagon or a custom box, and
   drag/resize it on the map.
 - **Trim** the start and end of the track.
@@ -52,9 +56,15 @@ Your settings are remembered in this browser; the route, trim and label text are
 | Shape | Fit route | Fit route, Square, 3:2, Hexagon or Custom. Drag the shape (or its centre handle) to move it, its corners to resize. Hexagon wraps itself tightly round the route and picks flat- or pointy-top, whichever is smaller |
 | Terrain around route | 1.8 km | Margin around the track; changing it resets an area edited on the map |
 | **Model** | | |
+| Print style | Relief | *Relief* (the terrain in 3D), *Contours* (lines on a flat plate) or *Terraced* (one step per contour level) |
 | Size | 180 mm | Longest side of the print |
 | Vertical exaggeration | 2× | Makes hills taller than real life |
 | Detail | Standard | Draft (0.5 mm grid), Standard (0.3 mm), Fine (0.2 mm). Finer means bigger files |
+| Units | mi · ft in the US, else km · m | For contour intervals and the label's stats |
+| Contour lines | Raised | Contours style: raised lines (best after slicing, and colourable by a filament change) or engraved |
+| Contour interval | Auto | Auto picks the finest round interval (in your units) whose lines stay at least 1.2 mm apart, so they don't merge when sliced; every 5th line is a bolder index line, and minor lines are dropped where the ground is too steep |
+| Plate thickness | 2.4 mm | Flat styles |
+| Line height / step height | 0.6 mm / 0.4 mm | Contours / Terraced |
 | **Trail** | | |
 | Style | Raised | *Raised* ridge, carved *Groove*, or separate *Inlay* (below) |
 | Height / depth, width | 1.0 mm, 1.6 mm | For an inlay, height is how far it stands proud of the terrain; 2 mm width is sturdier |
@@ -81,6 +91,10 @@ Your settings are remembered in this browser; the route, trim and label text are
 ## Downloads and printing
 
 - **Download STL**: the whole model as one body, for single-colour printing.
+- **Flat prints in colour on any printer**: with raised contours, the stats list *Change filament at*
+  heights (plate top, then line tops). Add a filament change at those layers in the slicer (Bambu
+  Studio / OrcaSlicer: right-click the layer slider) to get a coloured map and a third colour for the
+  route. Pick a layer height that divides them (0.2 mm works for the defaults).
 - **Download parts (.zip)** (inlay style): `terrain.stl` plus `inlay-1-of-N.stl`, … numbered from
   start to finish. The inlay pieces are already turned to lie on their flat, sloped bottoms, so
   they print without supports. Print the terrain in one colour and the pieces in another, then press

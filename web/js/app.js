@@ -44,6 +44,11 @@ const SLIDERS = {
     { key: "labelRelief", label: "Lettering depth", unit: "mm", min: 0.4, max: 2, step: 0.1, help: "How far letters stand up, or are cut in" },
     { key: "labelAngle", label: "Rotation", unit: "°", min: -180, max: 180, step: 1, help: "Or drag the rotate handle above the label on the map" },
   ],
+  "flat-controls": [
+    { key: "flatPlate", label: "Plate thickness", unit: "mm", min: 1.2, max: 6, step: 0.2 },
+    { key: "flatLine", label: "Line height", unit: "mm", min: 0.2, max: 1.6, step: 0.2, help: "How far contour lines stand up, or are cut in" },
+    { key: "flatStep", label: "Step height", unit: "mm", min: 0.2, max: 1.6, step: 0.2, help: "Height of each terrace" },
+  ],
   "advanced-controls": [
     { key: "base", label: "Base thickness", unit: "mm", min: 1, max: 15, step: 0.5, help: "Under the lowest point" },
     { key: "cornerRadius", label: "Corner radius", unit: "mm", min: 0, max: 40, step: 1, help: "0 for square corners" },
@@ -57,6 +62,7 @@ const UI_DEFAULTS = {
   startMarker: "triangle", endMarker: "square", markerSize: DEFAULTS.markerSize, markerHeight: DEFAULTS.markerHeight,
   labelOn: false, labelStyle: "raised", labelSize: 4, labelTitleSize: 6, labelAlign: "center", labelRelief: 0.8, labelAngle: 0,
   inlayClearance: 0.15, inlayDepth: 3, inlayMaxHeight: 10,
+  printStyle: "relief", contourStyle: "raised", contourInterval: "auto", flatPlate: 2.4, flatLine: 0.6, flatStep: 0.4,
   labelUnits: /^en-(US|LR|MM)$/i.test(navigator.language) ? "imperial" : "metric",
 };
 
@@ -65,11 +71,20 @@ try { Object.assign(settings, JSON.parse(localStorage.getItem(STORE)) ?? {}); } 
 for (const k of ["labelSize", "labelTitleSize"]) settings[k] = Math.max(MIN_LETTER, settings[k]);   // older saves allowed 2 mm
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch {} };
 
+const isFlat = () => settings.printStyle !== "relief";
 const engineOpts = () => ({
   size: settings.size, zExag: settings.zExag, marginKm: settings.marginKm, cell: settings.cell,
-  trailHeight: settings.trailStyle === "groove" ? -settings.trailDepth : settings.trailDepth,
-  inlay: settings.trailStyle === "inlay"
+  // flat styles always raise the route; the groove and inlay styles are for the relief
+  trailHeight: settings.trailStyle === "groove" && !isFlat() ? -settings.trailDepth : settings.trailDepth,
+  inlay: settings.trailStyle === "inlay" && !isFlat()
     ? { clearance: settings.inlayClearance, depth: settings.inlayDepth, maxHeight: settings.inlayMaxHeight } : null,
+  printStyle: settings.printStyle,
+  contours: isFlat() ? {
+    unit: settings.labelUnits === "imperial" ? "ft" : "m",
+    interval: settings.contourInterval === "auto" ? null : +settings.contourInterval * (settings.labelUnits === "imperial" ? 0.3048 : 1),
+    plate: settings.flatPlate, lineHeight: settings.flatLine, stepHeight: settings.flatStep,
+    engraved: settings.contourStyle === "engraved",
+  } : null,
   trailWidth: settings.trailWidth, base: settings.base, cornerRadius: settings.cornerRadius, smooth: settings.smooth,
   area: engineArea(),
   origin: frame && { lat: frame.latc, lon: frame.lonc },   // keep the engine's frame = the map's when trimmed
@@ -135,6 +150,7 @@ $("shape").addEventListener("click", () => frame && fpMap.fit());
 const segSyncs = [bindSeg("detail", "cell", parseFloat), bindSeg("trail-style", "trailStyle"), bindSeg("shape", "shape"),
                   bindSeg("start-marker", "startMarker"), bindSeg("end-marker", "endMarker"),
                   bindSeg("label-units", "labelUnits"), bindSeg("label-style", "labelStyle"), bindSeg("label-align", "labelAlign"),
+                  bindSeg("print-style", "printStyle"), bindSeg("contour-style", "contourStyle"), () => syncFlat(),
                   () => { $("label-on").checked = settings.labelOn; $("label-body").hidden = !settings.labelOn; }];
 
 function syncControls() {
@@ -145,9 +161,30 @@ function syncControls() {
 const depthLabel = document.querySelector('label[for="r-trailDepth"]');
 $("trail-style").addEventListener("click", () => syncTrailLabel());
 const syncTrailLabel = () => {
-  depthLabel.textContent = { groove: "Depth", inlay: "Stands proud by" }[settings.trailStyle] ?? "Height";
-  $("inlay-body").hidden = settings.trailStyle !== "inlay";
+  depthLabel.textContent = isFlat() ? "Height" : { groove: "Depth", inlay: "Stands proud by" }[settings.trailStyle] ?? "Height";
+  $("inlay-body").hidden = settings.trailStyle !== "inlay" || isFlat();
 };
+
+// flat print styles: show their settings, hide the relief-only ones
+const INTERVALS = { metric: [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000], imperial: [10, 20, 25, 40, 50, 100, 200, 250, 500, 1000, 2000] };
+const fieldOf = (id) => $(id).closest(".field");
+function syncFlat() {
+  const flat = isFlat(), terraced = settings.printStyle === "terraced";
+  $("flat-body").hidden = !flat;
+  fieldOf("r-zExag").hidden = flat;
+  $("trail-style-field").hidden = flat;
+  $("contour-style-field").hidden = terraced;
+  fieldOf("r-flatLine").hidden = terraced;
+  fieldOf("r-flatStep").hidden = !terraced;
+  const unit = settings.labelUnits === "imperial" ? "ft" : "m", list = INTERVALS[settings.labelUnits] ?? INTERVALS.metric;
+  if (settings.contourInterval !== "auto" && !list.includes(+settings.contourInterval)) settings.contourInterval = "auto";
+  const html = `<option value="auto">Auto</option>` + list.map((v) => `<option value="${v}">${v.toLocaleString("en-US")} ${unit}</option>`).join("");
+  if ($("contour-interval").innerHTML !== html) $("contour-interval").innerHTML = html;
+  $("contour-interval").value = settings.contourInterval;
+  syncTrailLabel();
+}
+$("contour-interval").addEventListener("change", (e) => { settings.contourInterval = e.target.value; changed(); });
+for (const id of ["print-style", "label-units"]) $(id).addEventListener("click", () => syncFlat());
 
 // test-fit coupon: a short slot and its inlay with the current width and clearance
 $("coupon").addEventListener("click", () => {
@@ -570,6 +607,9 @@ function changed({ fromMap = false, labelDrag = false } = {}) {
     : `≈ ${p.width.toFixed(0)} × ${p.depth.toFixed(0)} mm · 1:${Math.round(1000 / p.sc).toLocaleString()} · ` +
       `${(p.triangles / 1e6).toFixed(p.triangles < 1e6 ? 2 : 1)}M triangles · ${fmtMB(bytes)}` +
       (p.triangles > 4e6 ? " (large: try a coarser detail level)" : "");
+  if (isFlat() && !tooMany)
+    est.textContent = `≈ ${p.width.toFixed(0)} × ${p.depth.toFixed(0)} mm · 1:${Math.round(1000 / p.sc).toLocaleString()} · ` +
+      `flat ${settings.printStyle === "terraced" ? "terraces" : "contours"} on a ${settings.flatPlate} mm plate`;
   btn.disabled = tooMany || busy;
   const fresh = model && builtFor === key();
   btn.textContent = fresh ? "Model is up to date" : model ? "Update model" : "Generate model";
@@ -703,7 +743,7 @@ function disposeMeshes() {
 
 function placeMeshes() {
   if (!model) return;
-  const lift = exploded ? model.stats.height * 0.6 + 6 : 0;
+  const lift = exploded && !model.flat ? model.stats.height * 0.6 + 6 : 0;
   meshes.forEach((ms, k) => ms.position.set(-model.stats.width / 2, -model.stats.depth / 2, k ? lift : 0));
   requestRender();
 }
@@ -712,13 +752,25 @@ function showModel(m, reframe = true) {
   disposeMeshes();
   const palette = [new THREE.Color(dark.matches ? 0xb9b3a4 : 0xd8d2c2), new THREE.Color(css("--accent")),
                    new THREE.Color(css("--start")), new THREE.Color(css("--finish")),
-                   new THREE.Color(css("--plate")), new THREE.Color(css("--lettering"))];   // see core/model.js
-  for (const part of [m, ...m.inlays]) {
+                   new THREE.Color(css("--plate")), new THREE.Color(css("--lettering")),
+                   new THREE.Color(css("--contour"))];   // see core/model.js; 6 = contour lines
+  const ROLE = { terrain: 0, route: 1, start: 2, finish: 3, lettering: 5, contours: 6 };
+  // flat prints come as separate parts, one colour each; the relief carries per-vertex colours
+  const shown = m.flat ? m.parts3mf.map((q) => ({ ...q, trail: new Uint8Array(q.positions.length / 3).fill(ROLE[q.role] ?? 0) }))
+                       : [m, ...m.inlays];
+  for (const part of shown) {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(part.positions, 3));
     g.setIndex(new THREE.BufferAttribute(part.indices, 1));
     const col = new Float32Array(part.trail.length * 3);
     for (let i = 0; i < part.trail.length; i++) palette[part.trail[i]].toArray(col, i * 3);
+    if (m.flat && part.role === "terrain" && m.stats.flat.style === "terraced") {
+      // preview only: shade the steps from low to high so the levels read on screen
+      const low = palette[0].clone().multiplyScalar(0.72), high = palette[0].clone().lerp(new THREE.Color(1, 1, 1), 0.35);
+      const z0 = m.stats.base, z1 = Math.max(z0 + 0.1, m.stats.height - 1), tint = new THREE.Color();
+      for (let i = 0; i < part.trail.length; i++)
+        tint.lerpColors(low, high, Math.min(1, Math.max(0, (part.positions[i * 3 + 2] - z0) / (z1 - z0)))).toArray(col, i * 3);
+    }
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     // the mesh is moved, never the vertices: they're also what gets exported
     const ms = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }));
@@ -726,6 +778,7 @@ function showModel(m, reframe = true) {
     meshes.push(ms);
   }
   $("explode").hidden = !m.inlays.length;
+  exploded &&= m.inlays.length > 0;
   placeMeshes();
   $("tabs").querySelector('[data-tab="3d"]').disabled = false;
   $("viewer").classList.add("has-model");
@@ -739,6 +792,10 @@ function showModel(m, reframe = true) {
     ["Volume", `${Math.round(s.volume)} cm³`],
     ["Triangles", s.triangles.toLocaleString()],
   ];
+  if (s.flat) {
+    stats.splice(2, 0, [s.flat.style === "terraced" ? "Terraces" : "Contours", `every ${s.flat.interval} (${s.flat.levels} levels)`]);
+    if (s.flat.swaps.length) stats.push(["Change filament at", s.flat.swaps.map((z) => `${z.toFixed(1)} mm`).join(", ")]);
+  }
   if (s.inlay) stats.splice(3, 0, ["Inlay", `${s.inlay.pieces} piece${s.inlay.pieces === 1 ? "" : "s"}, up to ${s.inlay.tallest.toFixed(1)} mm`],
                                   ["Base", `${s.base.toFixed(1)} mm`]);
   $("stats").innerHTML = stats.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
@@ -798,11 +855,11 @@ $("download").addEventListener("click", () => {
 $("download-3mf").addEventListener("click", () => {
   if (!model) return;
   // one object, one part per colour: terrain, route pieces, start/finish markers, label lettering
-  const COLORS = { terrain: "#D8D2C2", route: "#E8590C", start: "#2F9E44", finish: "#C92A2A", lettering: "#2B2F28" };
+  const COLORS = { terrain: "#D8D2C2", route: "#E8590C", start: "#2F9E44", finish: "#C92A2A", lettering: "#2B2F28", contours: "#6B4F2A" };
   saveBlob(make3mf(model.parts3mf.map((q) => ({ ...q, color: COLORS[q.role] })), route.name), `${fileBase()}.3mf`);
 });
 
 syncControls();
-syncTrailLabel();
+syncFlat();
 applyTheme();
 changed();

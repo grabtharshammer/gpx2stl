@@ -76,6 +76,14 @@
 
       <section class="card">
         <h2>3 &middot; Model</h2>
+        <div class="field">
+          <span class="label">Print style</span>
+          <div class="seg" id="print-style" role="radiogroup" aria-label="Print style">
+            <button type="button" data-v="relief" title="The terrain itself, in 3D">Relief</button>
+            <button type="button" data-v="contours" title="A flat plate with contour lines: prints much faster">Contours</button>
+            <button type="button" data-v="terraced" title="Stacked steps, one per contour level: prints much faster">Terraced</button>
+          </div>
+        </div>
         <div id="model-controls"></div>
         <div class="field">
           <span class="label">Detail</span>
@@ -85,11 +93,35 @@
             <button type="button" data-v="0.2">Fine</button>
           </div>
         </div>
+        <div class="field">
+          <span class="label">Units</span>
+          <div class="seg" id="label-units" role="radiogroup" aria-label="Units">
+            <button type="button" data-v="imperial">mi &middot; ft</button>
+            <button type="button" data-v="metric">km &middot; m</button>
+          </div>
+        </div>
+        <div id="flat-body" hidden>
+          <p class="area-note">A flat plate that prints in a fraction of the time. After building, the stats show where to
+            change filament for coloured contours and route on a single-colour printer.</p>
+          <div class="field" id="contour-style-field">
+            <span class="label">Contour lines</span>
+            <div class="seg" id="contour-style" role="radiogroup" aria-label="Contour lines">
+              <button type="button" data-v="raised">Raised</button>
+              <button type="button" data-v="engraved">Engraved</button>
+            </div>
+          </div>
+          <div class="field">
+            <div class="row"><label class="label" for="contour-interval">Contour interval</label></div>
+            <select id="contour-interval"></select>
+            <span class="help">Auto picks the finest interval whose lines stay far enough apart to print</span>
+          </div>
+          <div id="flat-controls"></div>
+        </div>
       </section>
 
       <section class="card">
         <h2>4 &middot; Trail</h2>
-        <div class="field">
+        <div class="field" id="trail-style-field">
           <span class="label">Style</span>
           <div class="seg" id="trail-style" role="radiogroup" aria-label="Trail style">
             <button type="button" data-v="raised" title="A raised ridge moulded into the terrain">Raised</button>
@@ -127,13 +159,6 @@
         <div id="label-body" hidden>
           <textarea id="label-text" rows="4" spellcheck="false" aria-label="Label text"></textarea>
           <p class="area-note"><span id="label-status"></span> <button class="link" type="button" id="label-fill">Fill in from the GPX</button></p>
-          <div class="field">
-            <span class="label">Units</span>
-            <div class="seg" id="label-units" role="radiogroup" aria-label="Units">
-              <button type="button" data-v="imperial">mi &middot; ft</button>
-              <button type="button" data-v="metric">km &middot; m</button>
-            </div>
-          </div>
           <div class="field">
             <span class="label">Lettering</span>
             <div class="seg" id="label-style" role="radiogroup" aria-label="Lettering">

@@ -115,6 +115,24 @@ console.log(bad ? `${bad} mismatches` : "OK: matches the reference model");
   if (out) await writeFile(out.replace(/\.stl$/, "-markers.stl"), Buffer.from(writeStl(mm.positions, mm.indices, "markers")));
   console.log(bad ? "FAILED" : "OK: markers");
 }
+// Flat prints: contour lines and terraces build valid, non-overlapping parts; the automatic
+// interval keeps the Whole Enchilada's lines apart (200 m), and filament swaps sit at the plate
+// top and the line tops.
+for (const style of ["contours", "terraced"]) {
+  const fm = await buildModel(gpx.segments, { printStyle: style, startMarker: "triangle", endMarker: "square", label: null },
+                              { getTile, manifold: wasm });
+  const f = fm.stats.flat;
+  console.log(`flat ${style}: every ${f.interval}, ${f.levels} levels, ${fm.stats.width.toFixed(0)} x ${fm.stats.depth.toFixed(0)} x ` +
+              `${fm.stats.height.toFixed(1)} mm, ${fm.stats.volume.toFixed(0)} cm3, swaps ${f.swaps.join("/") || "-"}`);
+  bad += checkParts(style, fm);
+  if (f.interval !== "200 m" || f.levels < 10) { bad++; console.log(`MISMATCH ${style}: interval/levels`); }
+  if (style === "contours" && (f.swaps[0] !== 2.4 || Math.abs(f.swaps[1] - 3.0) > 1e-9)) { bad++; console.log("MISMATCH swap heights"); }
+  if (style === "terraced" && !(fm.stats.volume > 60)) { bad++; console.log("MISMATCH terraces missing"); }
+  const roles = fm.parts3mf.map((q) => q.role).join(",");
+  if (!roles.includes("route") || !roles.includes("start") || (style === "contours" && !roles.includes("contours"))) { bad++; console.log(`MISMATCH ${style} parts: ${roles}`); }
+}
+console.log(bad ? "FAILED" : "OK: flat prints");
+
 // Trimming: the whole range is a no-op; a cut gives exactly the requested length and snaps back.
 {
   const L = routeLength(gpx.segments);
