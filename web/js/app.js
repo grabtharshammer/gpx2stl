@@ -638,7 +638,7 @@ function generate() {
   if (!route) return;
   if (busy) { worker.terminate(); worker = null; }
   worker ??= new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-  const id = ++reqId, k = key();
+  const id = ++reqId, k = key(), variant = fileVariant();
   busy = true;
   showError(null);
   $("progress").hidden = false;
@@ -651,6 +651,7 @@ function generate() {
     $("progress").hidden = true;
     if (data.type === "error") { showError(data.message); changed(); return; }
     model = data.model;
+    model.variant = variant;
     builtFor = k;
     showModel(model);
     showTab("3d");
@@ -827,7 +828,12 @@ function saveBlob(blob, name) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
-const fileBase = () => route.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "route";
+// e.g. "relief_hex", "contours-engraved_square": taken when the build starts, so the name
+// matches the model on screen even if settings have changed since
+const SHAPE_NAMES = { fit: "rect", square: "square", "3:2": "3x2", hex: "hex", custom: "custom" };
+const fileVariant = () => [isFlat() && settings.printStyle === "contours" && settings.contourStyle === "engraved" ? "contours-engraved" : settings.printStyle,
+                           SHAPE_NAMES[settings.shape] ?? settings.shape].join("_");
+const fileBase = () => [route.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "route", model?.variant].filter(Boolean).join("_");
 
 $("download").addEventListener("click", () => {
   if (!model) return;
