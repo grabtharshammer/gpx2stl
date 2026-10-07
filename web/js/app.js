@@ -175,6 +175,10 @@ let trim = null;       // printed part of the route: { from, to } metres along i
 let segs = [];         // the trimmed route segments; everything downstream uses these
 let routePts = [];     // trimmed route points in the frame, metres
 let bounds = null;     // their bounding box
+// derived once per trim: length, times, points per segment (metres), and a thinned point list
+// (<= 800, ~print-resolution) for the per-frame "is the route inside / under the label" checks
+let trimmed = { length: 0, times: null, metres: [], check: [] };
+let hexCache = {};
 let override = null;   // print area set on the map, { x0, x1, y0, y1 } metres; null = automatic
 let model = null;      // last built model
 let profile = null;    // elevation along the (trimmed) route from the terrain tiles: { max, min, gain, loss }
@@ -195,7 +199,6 @@ import("opentype.js")
   })
   .catch((err) => console.warn("Label font failed to load", err));
 
-/** Text laid out for the plate: { contours, w, h (plate mm), path (SVG) } or null. */
 let printSize = null;          // { w, d } of the print in mm, from the latest plan
 
 /**
@@ -206,21 +209,19 @@ let printSize = null;          // { w, d } of the print in mm, from the latest p
 function labelPlate() {
   if (!settings.labelOn || !font) return null;
   const { labelSize: body, labelTitleSize: title, labelAlign: align } = settings;
-  const k = `${body}|${title}|${align}|${printSize?.w.toFixed(0)}|${printSize?.d.toFixed(0)}|${labelText}`;
-  if (labelCache.k !== k) {
-    const lay = (f) => {
-      const t = layoutText(font, labelText, body * f, { titleHeight: title * f, align });
-      const pad = Math.max(2, Math.max(body, title) * f * 0.5);
-      return t && { contours: t.contours, w: t.width + 2 * pad, h: t.height + 2 * pad };
-    };
-    let t = lay(1), shrink = 1;
-    if (t && printSize) {
-      shrink = Math.min(1, (0.9 * printSize.w) / t.w, (0.6 * printSize.d) / t.h);
-      if (shrink < 0.999) t = lay(shrink);
-    }
-    labelCache = { k, v: t && { ...t, path: contoursToSvgPath(t.contours), shrink } };
-  }
-  const v = labelCache.v, note = $("label-fit");
+  const lay = (f) => {
+    const k = `${body}|${title}|${align}|${f}|${labelText}`;
+    if (labelCache[f === 1 ? "full" : "fit"]?.k === k) return labelCache[f === 1 ? "full" : "fit"].v;
+    const t = layoutText(font, labelText, body * f, { titleHeight: title * f, align });
+    const pad = Math.max(2, Math.max(body, title) * f * 0.5);
+    const v = t && { contours: t.contours, w: t.width + 2 * pad, h: t.height + 2 * pad, path: contoursToSvgPath(t.contours), shrink: f };
+    labelCache[f === 1 ? "full" : "fit"] = { k, v };
+    return v;
+  };
+  const full = lay(1);
+  // shrink to fit the print, in 1% steps so dragging the size slider doesn't relayout every time
+  const shrink = full && printSize ? Math.floor(Math.min(1, (0.9 * printSize.w) / full.w, (0.6 * printSize.d) / full.h) * 100) / 100 : 1;
+  const v = shrink < 1 ? lay(shrink) : full, note = $("label-fit");
   note.hidden = !v || v.shrink >= 0.999;
   if (v && v.shrink < 0.999) {
     const smallest = Math.min(body, title) * v.shrink;
@@ -238,11 +239,12 @@ function labelEngineOpts() {
            style: settings.labelStyle, relief: settings.labelRelief, angle: settings.labelAngle };
 }
 
-const num = (v, digits = 0) => v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const NUM = [0, 1].map((d) => new Intl.NumberFormat("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }));
+const num = (v, digits = 0) => NUM[digits].format(v);
 
 /** Name, distance, climbing, high point, date and duration, in the chosen units. */
 function autoLabelText() {
-  const imperial = settings.labelUnits === "imperial", dist = routeLength(segs);
+  const imperial = settings.labelUnits === "imperial", dist = trimmed.length;
   const elev = (m) => num(Math.round(imperial ? m * 3.28084 : m)), unit = imperial ? "ft" : "m";
   const lines = [route.name];
   let l2 = imperial ? `${num(dist / 1609.344, 1)} mi` : `${num(dist / 1000, 1)} km`;
@@ -250,7 +252,7 @@ function autoLabelText() {
   lines.push(l2);
   const l3 = [];
   if (profile) l3.push(`High point ${elev(profile.max)} ${unit}`);
-  const t = routeTimes(segs);
+  const t = trimmed.times;
   if (t) {
     const mins = Math.round((t.end - t.start) / 60000);
     l3.push(new Date(t.start).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }),
@@ -296,13 +298,13 @@ function requestProfile() {
  */
 function autoLabelSpot(a, wM, hM, inset, cellM, fits) {
   const gw = Math.ceil((a.x1 - a.x0) / cellM), gh = Math.ceil((a.y1 - a.y0) / cellM);
+  if (gw * gh > 4e6) return { x: (a.x0 + a.x1) / 2, y: (a.y0 + a.y1) / 2 };
   const sat = new Int32Array((gw + 1) * (gh + 1));
   const mark = (x, y) => {
     const i = Math.floor((x - a.x0) / cellM), j = Math.floor((y - a.y0) / cellM);
     if (i >= 0 && i < gw && j >= 0 && j < gh) sat[(j + 1) * (gw + 1) + i + 1] = 1;
   };
-  for (const s of segs) {
-    const m = s.map(frame.toM);
+  for (const m of trimmed.metres) {
     for (let k = 1; k < m.length; k++) {            // walk each leg so long straight legs count too
       const n = Math.ceil(Math.hypot(m[k][0] - m[k - 1][0], m[k][1] - m[k - 1][1]) / (cellM / 2));
       for (let t = 0; t <= n; t++) mark(m[k - 1][0] + ((m[k][0] - m[k - 1][0]) * t) / n, m[k - 1][1] + ((m[k][1] - m[k - 1][1]) * t) / n);
@@ -317,13 +319,16 @@ function autoLabelSpot(a, wM, hM, inset, cellM, fits) {
     return sat[j1 * (gw + 1) + i1] - sat[j0 * (gw + 1) + i1] - sat[j1 * (gw + 1) + i0] + sat[j0 * (gw + 1) + i0];
   };
   const home = { x: (a.x0 + a.x1) / 2, y: a.y0 + hM / 2 + inset };
-  let best = null;
+  const cand = [];
   for (let y = a.y0 + hM / 2; y <= a.y1 - hM / 2; y += cellM)
-    for (let x = a.x0 + wM / 2; x <= a.x1 - wM / 2; x += cellM) {
-      if (!fits(x, y)) continue;
-      const score = covered(x, y) * 1e12 + Math.hypot(x - home.x, (y - home.y) * 2);   // prefer low over sideways
-      if (!best || score < best.score) best = { x, y, score };
-    }
+    for (let x = a.x0 + wM / 2; x <= a.x1 - wM / 2; x += cellM) cand.push([Math.hypot(x - home.x, (y - home.y) * 2), x, y]);   // prefer low over sideways
+  cand.sort((p, q) => p[0] - q[0]);
+  for (const [, x, y] of cand) if (!covered(x, y) && fits(x, y)) return { x, y };   // nearest clear spot
+  let best = null;                                  // nowhere clear: cover as little route as possible
+  for (const [d, x, y] of cand) {
+    const score = covered(x, y) * 1e12 + d;
+    if ((!best || score < best.score) && fits(x, y)) best = { x, y, score };
+  }
   return best ? { x: best.x, y: best.y } : { x: home.x, y: (a.y0 + a.y1) / 2 };
 }
 
@@ -344,7 +349,7 @@ function placeLabel(p, a, poly, skipMap) {
   const warn = [];
   if (!fits(c.x, c.y, 0)) warn.push("The label hangs off the print");
   const under = ([x, y]) => Math.abs((x - c.x) * ca + (y - c.y) * sa) < wM / 2 && Math.abs(-(x - c.x) * sa + (y - c.y) * ca) < hM / 2;
-  if (routePts.some(under)) warn.push("The label covers part of the route");
+  if (trimmed.check.some(under)) warn.push("The label covers part of the route");
   return warn;
 }
 
@@ -358,8 +363,14 @@ const fmtKm = (m) => `${(m / 1000).toFixed(1)} km`;
 
 function applyTrim() {
   const full = trim.from <= 0 && trim.to >= index.length;
-  segs = full ? route.segments : trimSegments(route.segments, trim.from, trim.to);
+  segs = full ? route.segments : trimSegments(route.segments, trim.from, trim.to, index.cums);
   routePts = segs.flat().map(frame.toM);
+  const stride = Math.max(1, Math.floor(routePts.length / 800));
+  trimmed = {
+    length: full ? index.length : trim.to - trim.from, metres: segs.map((s) => s.map(frame.toM)),
+    check: routePts.filter((_, i) => i % stride === 0 || i === routePts.length - 1),
+  };
+  trimmed.times = routeTimes(segs, trimmed.length);
   bounds = { xmin: Infinity, xmax: -Infinity, ymin: Infinity, ymax: -Infinity };
   for (const [x, y] of routePts) {
     bounds.xmin = Math.min(bounds.xmin, x); bounds.xmax = Math.max(bounds.xmax, x);
@@ -388,8 +399,12 @@ $("trim-from").addEventListener("input", (e) => setTrim("start", +e.target.value
 $("trim-to").addEventListener("input", (e) => setTrim("end", +e.target.value));
 
 function autoHexagon() {
-  const b = bounds;
-  return fitHexagon(routePts, (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, settings.marginKm * 1000);
+  if (hexCache.pts !== routePts || hexCache.margin !== settings.marginKm) {
+    const b = bounds;
+    hexCache = { pts: routePts, margin: settings.marginKm,
+                 v: fitHexagon(routePts, (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, settings.marginKm * 1000) };
+  }
+  return hexCache.v;
 }
 
 /** Locked width/height ratio for the current shape, oriented like the route; null = free. */
@@ -452,7 +467,7 @@ function updateArea(p, fromMap, labelDrag) {
   const km = (m) => (m / 1000).toFixed(m < 10000 ? 1 : 0);
   const poly = roundedOutline(outline(footprintShape(), a.x1 - a.x0, a.y1 - a.y0), cornerM);
   const warn = placeLabel(p, a, poly, labelDrag);
-  if (routePts.some(([x, y]) => !insidePolygon(poly, x - a.x0, y - a.y0))) warn.unshift("Part of the route is outside the print area");
+  if (trimmed.check.some(([x, y]) => !insidePolygon(poly, x - a.x0, y - a.y0))) warn.unshift("Part of the route is outside the print area");
   $("map-info").innerHTML = `${km(a.x1 - a.x0)} × ${km(a.y1 - a.y0)} km → <b>${p.width.toFixed(0)} × ${p.depth.toFixed(0)} mm</b>` +
     warn.map((w) => `<br><span class="warn">${w}</span>`).join("");
   $("area-note").innerHTML = override
@@ -526,16 +541,14 @@ $("example").addEventListener("click", async () => {
   const r = await fetch("examples/whole_enchilada.gpx");
   loadText(await r.text(), "whole_enchilada.gpx");
 });
-for (const t of [document.body]) {
-  t.addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
-  t.addEventListener("dragleave", (e) => { if (!e.relatedTarget) $("drop").classList.remove("over"); });
-  t.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    $("drop").classList.remove("over");
-    const f = e.dataTransfer.files[0];
-    if (f) loadText(await f.text(), f.name);
-  });
-}
+document.body.addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
+document.body.addEventListener("dragleave", (e) => { if (!e.relatedTarget) $("drop").classList.remove("over"); });
+document.body.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  $("drop").classList.remove("over");
+  const f = e.dataTransfer.files[0];
+  if (f) loadText(await f.text(), f.name);
+});
 
 // ------------------------------------------------------------------ estimate + state
 const fmtMB = (bytes) => (bytes / 1e6 < 10 ? (bytes / 1e6).toFixed(1) : Math.round(bytes / 1e6)) + " MB";
@@ -569,13 +582,15 @@ function showError(msg) {
 }
 
 // ------------------------------------------------------------------ worker
+// share of the progress bar per stage, from measured build times (the geometry step dominates;
+// tiles can take a while on a first, uncached build)
 const STAGES = {
-  engine: ["Loading geometry engine…", 0, 0.05],
-  tiles: ["Downloading elevation data…", 0.05, 0.6],
-  terrain: ["Shaping terrain…", 0.6, 0.7],
-  route: ["Tracing your route…", 0.7, 0.78],
-  mesh: ["Building mesh…", 0.78, 0.85],
-  solid: ["Making it printable…", 0.85, 1],
+  engine: ["Loading geometry engine…", 0, 0.03],
+  tiles: ["Downloading elevation data…", 0.03, 0.3],
+  terrain: ["Shaping terrain…", 0.3, 0.35],
+  route: ["Tracing your route…", 0.35, 0.38],
+  mesh: ["Building mesh…", 0.38, 0.4],
+  solid: ["Making it printable…", 0.4, 1],
 };
 let worker = null, busy = false, reqId = 0;
 

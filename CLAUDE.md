@@ -86,6 +86,18 @@ piece. Base is raised to depth + minFloor + 1.5 mm. Exports: zip (terrain + `lay
 README) and 3MF (assembled objects). Meshes use `mergedTris` so indexed exports are closed.
 Whole Enchilada at defaults: 3 pieces (single flat floor would need ~28 mm fins).
 
+## Performance (measured on the Pi 5, ~4x slower than a laptop)
+- Builds: 85-95% is the manifold "solid" stage. Building the terrain Manifold (~0.5M tris) is
+  ~1.2 s; every boolean with the whole terrain is another ~1 s pass. So small bodies are batched:
+  adds (label plate) in one union, cuts (engraving, inlay slots) in one subtract, the footprint,
+  then markers + raised letters in one final union. Default ~3.2 s, markers + label ~5 s,
+  inlay ~8.4 s. `status()` is forced between stages so the progress bar moves honestly.
+- UI: `changed()` runs on every slider input; keep it under ~16 ms. Per-trim data lives in
+  `trimmed` (length, times, per-segment metres, a <= 800-point `check` list); the hexagon fit is
+  cached per trim/margin; text layout is cached at full size and at the shrink-to-fit size (1%
+  steps); the automatic label spot tries candidates nearest bottom-centre first and stops at the
+  first clear one. Profile with CDP `Profiler` in headless Chromium if it regresses.
+
 ## 3D preview
 Renders on demand (`requestRender`), not every frame: a ~0.5M-triangle model at 60 fps drains
 batteries and stalled the Pi's software GL in the headless tests.

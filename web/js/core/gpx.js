@@ -64,21 +64,24 @@ export function routeLength(segments) {
 
 const lerp = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);   // lat, lon, and time/ele too
 
-/** The part of the route between `from` and `to` metres along it, cut exactly at those points. */
-export function trimSegments(segments, from, to) {
+/**
+ * The part of the route between `from` and `to` metres along it, cut exactly at those points.
+ * cums (optional): cumulative distances per segment from routeIndex, to skip re-measuring.
+ */
+export function trimSegments(segments, from, to, cums = null) {
   const out = [];
   let d = 0;
-  for (const s of segments) {
+  segments.forEach((s, si) => {
     const cur = [];
     if (d >= from && d <= to) cur.push(s[0]);
     for (let i = 1; i < s.length; i++) {
-      const len = haversine(s[i - 1], s[i]), d0 = d, d1 = d + len;
+      const len = cums ? cums[si][i] - cums[si][i - 1] : haversine(s[i - 1], s[i]), d0 = d, d1 = d + len;
       if (d0 < from && d1 > from) cur.push(lerp(s[i - 1], s[i], (from - d0) / len));
       if (d1 > from && d0 < to) cur.push(d1 <= to ? s[i] : lerp(s[i - 1], s[i], (to - d0) / len));
       d = d1;
     }
     if (cur.length > 1) out.push(cur);
-  }
+  });
   return out;
 }
 
@@ -96,6 +99,7 @@ export function routeIndex(segments, toM) {
   }
   return {
     length: d,
+    cums: parts.map((q) => q.cum),
     nearest(x, y) {
       let best = { d2: Infinity };
       for (const { ll, m, cum } of parts) {

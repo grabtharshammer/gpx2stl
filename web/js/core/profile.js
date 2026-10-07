@@ -63,12 +63,12 @@ const MAX_SPEED = 80 / 3.6;   // m/s; faster than this on average means the time
 /**
  * First/last timestamps (ms) on the route, or null. Course files often carry made-up times
  * (e.g. one second per point), which would print a nonsense date and duration, so those are
- * rejected by their implied average speed.
+ * rejected by their implied average speed. Pass the route length if it's already known.
  */
-export function routeTimes(segments) {
-  let start = null, end = null, dist = 0;
+export function routeTimes(segments, length = null) {
+  let start = null, end = null, dist = length ?? 0;
   for (const s of segments) for (let i = 0; i < s.length; i++) {
-    if (i) dist += haversine(s[i - 1], s[i]);
+    if (i && length == null) dist += haversine(s[i - 1], s[i]);
     if (Number.isFinite(s[i][2])) { start ??= s[i][2]; end = s[i][2]; }
   }
   if (start == null || !(end > start)) return null;

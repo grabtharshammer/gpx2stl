@@ -246,7 +246,14 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
   const keep = (x) => (trash.push(x), x);
   let lettering = null;
   try {
+    // Every boolean with the full terrain costs a pass over ~0.5M triangles, so small bodies are
+    // collected and applied in batches: what's added to / cut from the terrain, then the footprint,
+    // then the small parts that sit on top (markers, raised letters).
+    // (manifold evaluates lazily; status() forces each stage so progress reports are honest)
     let solid = keep(gridSolid(manifold, Zt, nx, cell, 0, nx - 1, 0, ny - 1));
+    solid.status();
+    progress("solid", 0.3);
+    const adds = [], cuts = [];
     // start/finish markers stay separate bodies until the end (their own 3MF parts); with an
     // inlay they ride on the first and last pieces instead (see below)
     const markerBodies = [];
@@ -258,12 +265,12 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       const { cx, cy, width: w, height: h, top, angle } = label, pr = Math.min(1.5, w / 4, h / 4);
       const place = (cs) => keep(keep(keep(cs.rotate(angle)).translate([cx, cy])).intersect(keep(CrossSection.square([W, D]))));
       const plate = place(keep(keep(CrossSection.square([w - 2 * pr, h - 2 * pr], true)).offset(pr, "Round", 2, 32)));
-      solid = keep(solid.add(keep(Manifold.extrude(plate, top))));
+      adds.push(keep(Manifold.extrude(plate, top)));
       const text = place(keep(new CrossSection(label.contours, "NonZero")));
       // the lettering stays a separate body until the end, so a 3MF can give it its own filament:
       // raised letters stand on the plate; engraved ones get a fill that is flush with it
       if (label.style === "engraved") {
-        solid = keep(solid.subtract(keep(keep(Manifold.extrude(text, label.relief + 1)).translate([0, 0, top - label.relief]))));
+        cuts.push(keep(keep(Manifold.extrude(text, label.relief + 1)).translate([0, 0, top - label.relief])));
         lettering = keep(keep(Manifold.extrude(text, label.relief)).translate([0, 0, top - label.relief]));
       } else {
         lettering = keep(keep(Manifold.extrude(text, label.relief)).translate([0, 0, top]));
@@ -284,7 +291,7 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       };
       const lines = segments.map((s) => s.map((p) => { const [x, y] = plan.toM(p); return [(x - xmin) * sc, (y - ymin) * sc]; }));
       const plans = planPieces(lines, heightAt, { ...inl, proud });
-      const cuts = [];
+      const slots = [];
       let taken = null;                        // outlines (with clearance) of earlier pieces
       plans.forEach((pc, k) => {
         const mk = markers.filter((m) => (m.kind === 2 && k === 0) || (m.kind === 3 && k === plans.length - 1));
@@ -293,7 +300,7 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         for (const m of mk) outer = keep(outer.add(keep(keep(new CrossSection([m.poly])).offset(inl.clearance, "Round", 2, 16))));
         let inner = keep(new CrossSection(bufferPolyline(pc.pts, rIn), "NonZero"));
         if (taken) inner = keep(inner.subtract(taken));
-        cuts.push(keep(keep(Manifold.extrude(outer, ztop + 20)).trimByPlane(nrm, off)));
+        slots.push(keep(keep(Manifold.extrude(outer, ztop + 20)).trimByPlane(nrm, off)));
         // the piece: from its floor plane up to the terrain surface (+ proud), over its outline
         const bb = outer.bounds(), pad = 2;
         const i0 = Math.max(0, Math.floor(bb.min[0] / cell) - pad), i1 = Math.min(nx - 1, Math.ceil(bb.max[0] / cell) + pad);
@@ -313,12 +320,16 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
         taken = taken ? keep(taken.add(outer)) : outer;
         pieces.push({ solid: piece, fin, markerBodies: own, plane: pc.plane, height: pc.height, tilt: pc.tilt, markers: mk });
       });
-      if (cuts.length) {
-        const cut = keep(Manifold.union(cuts));
-        solid = keep(solid.subtract(cut));
-        if (lettering) lettering = keep(lettering.subtract(cut));
+      if (slots.length) {
+        const slot = keep(Manifold.union(slots));
+        cuts.push(slot);
+        if (lettering) lettering = keep(lettering.subtract(slot));
       }
     }
+    if (adds.length) solid = keep(Manifold.union([solid, ...adds]));
+    if (cuts.length) solid = keep(solid.subtract(cuts.length > 1 ? keep(Manifold.union(cuts)) : cuts[0]));
+    solid.status();
+    progress("solid", 0.5);
 
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
     let footprint = null;
@@ -333,15 +344,18 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       footprint = keep(Manifold.extrude(keep(CrossSection.square([W, D])), ztop + 10));   // pieces may overhang the edge
     }
     if (footprint) solid = keep(solid.intersect(footprint));
+    solid.status();
+    progress("solid", 0.75);
     if (lettering && footprint) lettering = keep(lettering.intersect(footprint));
     if (lettering?.isEmpty()) lettering = null;
     // single-colour body: raised letters merged in (engraved ones are just the empty pocket)
     const plain = solid;                       // terrain alone, for the 3MF
     const parts = [];                          // [name, role, manifold] for the 3MF
+    const onTop = [];                          // small bodies merged into the single-colour model
     for (const b of markerBodies) {
       const ms = footprint ? keep(b.solid.intersect(footprint)) : b.solid;
       if (ms.isEmpty()) continue;
-      solid = keep(solid.add(ms));             // single-colour body
+      onTop.push(ms);
       // the part is only what stands above the ground, so it doesn't overlap the terrain part
       const reach = o.markerSize / 2 + 2 * cell;
       const i0 = Math.max(0, Math.floor((b.m.cx - reach) / cell)), i1 = Math.min(nx - 1, Math.ceil((b.m.cx + reach) / cell));
@@ -349,9 +363,11 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
       const above = keep(ms.subtract(keep(gridSolid(manifold, Zt, nx, cell, i0, i1, j0, j1))));
       if (!above.isEmpty()) parts.push([b.m.kind === 2 ? "Start marker" : "Finish marker", b.m.kind === 2 ? "start" : "finish", above]);
     }
-    if (lettering && label.style !== "engraved") solid = keep(solid.add(lettering));
+    if (lettering && label.style !== "engraved") onTop.push(lettering);
+    if (onTop.length) solid = keep(Manifold.union([solid, ...onTop]));
     const status = solid.status();
     if (status !== "NoError" || solid.isEmpty()) throw new Error(`Mesh is not a valid solid (${status})`);
+    progress("solid", 0.9);
     const mesh = solid.getMesh();
     const np = mesh.numProp, mv = mesh.vertProperties, nv = mv.length / np;
     const positions = new Float32Array(nv * 3), trail = new Uint8Array(nv);
