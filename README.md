@@ -65,6 +65,7 @@ Your settings are remembered in this browser; the route, trim and label text are
 | Contour interval | Auto | Auto picks the finest round interval (in your units) whose lines stay at least 1.2 mm apart, so they don't merge when sliced; every 5th line is a bolder index line, and minor lines are dropped where the ground is too steep |
 | Plate thickness | 2.4 mm | Flat styles |
 | Line height / step height | 0.6 mm / 0.4 mm | Contours / Terraced |
+| Line width | 0.5 mm | Contours; index lines are 1.5× wider. Go down to about your nozzle size |
 | **Trail** | | |
 | Style | Raised | *Raised* ridge, carved *Groove*, or separate *Inlay* (below) |
 | Height / depth, width | 1.0 mm, 1.6 mm | For an inlay, height is how far it stands proud of the terrain; 2 mm width is sturdier |

@@ -13,8 +13,8 @@ export const FLAT_DEFAULTS = {
   plate: 2.4,         // mm, base plate thickness
   lineHeight: 0.6,    // mm, raised (or engraved) contour lines
   engraved: false,
-  minorWidth: 0.8,    // mm
-  indexWidth: 1.2,    // mm, every 5th contour
+  minorWidth: 0.5,    // mm; about one nozzle width
+  indexWidth: 0.75,   // mm, every 5th contour
   stepHeight: 0.4,    // mm per terrace step
 };
 const GAP = 1.2;      // mm; minor contours closer than this are dropped (they'd merge when sliced)

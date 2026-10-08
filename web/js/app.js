@@ -47,6 +47,7 @@ const SLIDERS = {
   "flat-controls": [
     { key: "flatPlate", label: "Plate thickness", unit: "mm", min: 1.2, max: 6, step: 0.2 },
     { key: "flatLine", label: "Line height", unit: "mm", min: 0.2, max: 1.6, step: 0.2, help: "How far contour lines stand up, or are cut in" },
+    { key: "flatWidth", label: "Line width", unit: "mm", min: 0.3, max: 1.2, step: 0.05, help: "Every 5th (index) line is half as wide again. Around your nozzle size is the thinnest that prints well" },
     { key: "flatStep", label: "Step height", unit: "mm", min: 0.2, max: 1.6, step: 0.2, help: "Height of each terrace" },
   ],
   "advanced-controls": [
@@ -62,7 +63,7 @@ const UI_DEFAULTS = {
   startMarker: "triangle", endMarker: "square", markerSize: DEFAULTS.markerSize, markerHeight: DEFAULTS.markerHeight,
   labelOn: false, labelStyle: "raised", labelSize: 4, labelTitleSize: 6, labelAlign: "center", labelRelief: 0.8, labelAngle: 0,
   inlayClearance: 0.15, inlayDepth: 3, inlayMaxHeight: 10,
-  printStyle: "relief", contourStyle: "raised", contourInterval: "auto", flatPlate: 2.4, flatLine: 0.6, flatStep: 0.4,
+  printStyle: "relief", contourStyle: "raised", contourInterval: "auto", flatPlate: 2.4, flatLine: 0.6, flatWidth: 0.5, flatStep: 0.4,
   labelUnits: /^en-(US|LR|MM)$/i.test(navigator.language) ? "imperial" : "metric",
 };
 
@@ -83,6 +84,7 @@ const engineOpts = () => ({
     unit: settings.labelUnits === "imperial" ? "ft" : "m",
     interval: settings.contourInterval === "auto" ? null : +settings.contourInterval * (settings.labelUnits === "imperial" ? 0.3048 : 1),
     plate: settings.flatPlate, lineHeight: settings.flatLine, stepHeight: settings.flatStep,
+    minorWidth: settings.flatWidth, indexWidth: +(settings.flatWidth * 1.5).toFixed(2),
     engraved: settings.contourStyle === "engraved",
   } : null,
   trailWidth: settings.trailWidth, base: settings.base, cornerRadius: settings.cornerRadius, smooth: settings.smooth,
@@ -175,6 +177,7 @@ function syncFlat() {
   $("trail-style-field").hidden = flat;
   $("contour-style-field").hidden = terraced;
   fieldOf("r-flatLine").hidden = terraced;
+  fieldOf("r-flatWidth").hidden = terraced;
   fieldOf("r-flatStep").hidden = !terraced;
   const unit = settings.labelUnits === "imperial" ? "ft" : "m", list = INTERVALS[settings.labelUnits] ?? INTERVALS.metric;
   if (settings.contourInterval !== "auto" && !list.includes(+settings.contourInterval)) settings.contourInterval = "auto";
