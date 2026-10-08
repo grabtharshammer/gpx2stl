@@ -16,7 +16,7 @@ desktop and phone browsers. Everything runs in your browser; your GPX file is ne
   **terraces**, one step per contour level. A fraction of the print time and material, and with
   raised lines you get two- or three-colour prints on any printer by changing filament at the
   heights the app gives you.
-- **Print area on a topo map**: fit the route, or pick square, 3:2, hexagon or a custom box, and
+- **Print area on a topo map**: fit the route, or pick square, hexagon, circle or a custom box, and
   drag/resize it on the map.
 - **Trim** the start and end of the track.
 - **Start and finish markers** in a choice of shapes, turned to face the direction of travel.
@@ -33,7 +33,7 @@ desktop and phone browsers. Everything runs in your browser; your GPX file is ne
 2. **Trim it** if you like: the *Start at* / *Finish at* sliders, or drag the green and red dots
    along the route on the map.
 3. **Choose the print area** on the **Map** tab. *Fit route* takes the route plus the
-   *Terrain around route* margin; *Square*, *3:2* and *Hexagon* keep their shape; dragging a corner
+   *Terrain around route* margin; *Square*, *Hexagon* and *Circle* keep their shape; dragging a corner
    in *Fit route* switches to *Custom*. The label under the map shows the area in km and the print
    size in mm, and warns if part of the route falls outside.
 4. **Set up the model**: size, vertical exaggeration, detail, trail style, markers and label
@@ -53,7 +53,7 @@ Your settings are remembered in this browser; the route, trim and label text are
 | **Route** | | |
 | Start at / Finish at | whole route | Trim the track; or drag the green/red dots on the map |
 | **Print area** | | |
-| Shape | Fit route | Fit route, Square, 3:2, Hexagon or Custom. Drag the shape (or its centre handle) to move it, its corners to resize. Hexagon wraps itself tightly round the route and picks flat- or pointy-top, whichever is smaller |
+| Shape | Fit route | Fit route, Square, Hexagon, Circle or Custom. Drag the shape (or its centre handle) to move it, its corners to resize. Hexagon and Circle wrap themselves round the route; Hexagon picks flat- or pointy-top, whichever is smaller |
 | Terrain around route | 1.8 km | Margin around the track; changing it resets an area edited on the map |
 | **Model** | | |
 | Print style | Relief | *Relief* (the terrain in 3D), *Contours* (lines on a flat plate) or *Terraced* (one step per contour level) |

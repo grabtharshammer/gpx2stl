@@ -58,8 +58,9 @@ export function meshOut(m) {
   return { positions: pos, indices: mergedTris(g) };
 }
 
-/** The print's outline (W x D mm) as a CrossSection: rectangle or hexagon, corners rounded by r. */
+/** The print's outline (W x D mm) as a CrossSection: rectangle, hexagon or circle, corners rounded by r. */
 export function footprintSection(CrossSection, shape, W, D, r, keep) {
+  if (shape === "circle") return keep(new CrossSection([outline("circle", W, D)]));
   if (shape === "hex") {
     let cs = keep(new CrossSection([outline("hex", W, D)]));
     if (r > 0) cs = keep(keep(cs.offset(-r, "Miter")).offset(r, "Round", 2, 96));

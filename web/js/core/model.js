@@ -21,7 +21,7 @@ export const DEFAULTS = {
   trailHeight: 1.0,   // mm; negative cuts a groove
   trailWidth: 1.6,    // mm
   cornerRadius: 10,   // mm; 0 for square
-  shape: "rect",      // footprint: "rect" or "hex" (hexagon inscribed in the area)
+  shape: "rect",      // footprint: "rect", "hex" or "circle" (inscribed in the area)
   smooth: 0.8,        // terrain blur, grid cells
   startMarker: "none", // marker shape at the start / finish (see markers.js)
   endMarker: "none",
@@ -99,8 +99,8 @@ export function planGrid(segments, opts) {
   return {
     o, frame, latc, lonc, cosl, toM, lonOf, latOf, xmin, xmax, ymin, ymax, sc, nx, ny, z, tiles,
     width: (nx - 1) * o.cell, depth: (ny - 1) * o.cell,
-    // before cutting the footprint; a hexagon keeps about 3/4 of its box
-    triangles: Math.round((o.shape === "hex" ? 0.75 : 1) * 2 * (nx - 1) * (ny - 1)) + 3 * 2 * (nx + ny - 2),
+    // before cutting the footprint; a hexagon keeps about 3/4 of its box, a circle π/4
+    triangles: Math.round(({ hex: 0.75, circle: Math.PI / 4 }[o.shape] ?? 1) * 2 * (nx - 1) * (ny - 1)) + 3 * 2 * (nx + ny - 2),
   };
 }
 
@@ -321,7 +321,7 @@ export async function buildModel(segments, opts, { getTile, manifold, progress =
 
     const r = Math.min(o.cornerRadius, W / 2 - 0.1, D / 2 - 0.1);
     // (a plain rectangle needs no cut, except to trim inlay pieces that overhang the edge)
-    const footprint = o.shape === "hex" || r > 0 || pieces.length
+    const footprint = o.shape !== "rect" || r > 0 || pieces.length
       ? keep(Manifold.extrude(footprintSection(CrossSection, o.shape, W, D, r, keep), ztop + 10)) : null;
     if (footprint) solid = keep(solid.intersect(footprint));
     solid.status();

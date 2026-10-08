@@ -9,7 +9,7 @@ import Module from "manifold-3d";
 import { parseGpx, routeLength, trimSegments, routeIndex } from "../web/js/core/gpx.js";
 import { tileUrl, decodeTerrarium } from "../web/js/core/tiles.js";
 import { buildModel, routeFrame } from "../web/js/core/model.js";
-import { outline, fitHexagon } from "../web/js/core/footprint.js";
+import { outline, fitHexagon, fitCircle } from "../web/js/core/footprint.js";
 import { writeStl } from "../web/js/core/stl.js";
 import { layoutText } from "../web/js/core/text.js";
 import { routeProfile, routeTimes } from "../web/js/core/profile.js";
@@ -100,6 +100,24 @@ console.log(bad ? `${bad} mismatches` : "OK: matches the reference model");
   if (outside) { bad++; console.log("MISMATCH vertices outside the hexagon"); }
   if (Math.abs(xmax - hs.width) > 0.05) { bad++; console.log("MISMATCH hexagon does not reach the box edge"); }
   console.log(bad ? "FAILED" : "OK: hexagon");
+}
+// Circle footprint: square box, every vertex within the radius, and the rim reaches it.
+{
+  const f = routeFrame(gpx.segments), b = f.bounds;
+  const c = fitCircle(gpx.segments.flat().map(f.toM), (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, 1800);
+  const [south, west] = f.toLL(c.x0, c.y0), [north, east] = f.toLL(c.x1, c.y1);
+  const cm = await buildModel(gpx.segments, { shape: "circle", area: { south, west, north, east } }, { getTile, manifold: wasm });
+  const cs = cm.stats, R = cs.width / 2, p = cm.positions;
+  let outside = 0, rmax = 0;
+  for (let i = 0; i < p.length; i += 3) {
+    const r = Math.hypot(p[i] - R, p[i + 1] - cs.depth / 2);
+    if (r > R + 0.001) outside++;
+    rmax = Math.max(rmax, r);
+  }
+  console.log(`circle: ${cs.width.toFixed(1)} x ${cs.depth.toFixed(1)} mm, ${cs.volume.toFixed(0)} cm3, ${outside} vertices outside`);
+  if (Math.abs(cs.width / cs.depth - 1) > 0.01) { bad++; console.log("MISMATCH circle not square"); }
+  if (outside || rmax < R - 0.05) { bad++; console.log(`MISMATCH circle rim (max r ${rmax}, R ${R})`); }
+  console.log(bad ? "FAILED" : "OK: circle");
 }
 // Markers: both present (coloured vertices), valid solid, standing above the terrain.
 {

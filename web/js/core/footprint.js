@@ -5,9 +5,16 @@ const SQRT3 = Math.sqrt(3);
 /**
  * Outline (counter-clockwise, y up) of a footprint filling a w x h box at the origin.
  * "hex" is a regular hexagon when w/h = 2/√3 (flat top) or √3/2 (pointy top); orientation
- * follows the box.
+ * follows the box. "circle" is a CIRCLE_SIDES-gon inscribed in the box (a circle when w = h).
  */
+export const CIRCLE_SIDES = 128;
 export function outline(shape, w, h) {
+  if (shape === "circle") {
+    return Array.from({ length: CIRCLE_SIDES }, (_, k) => {
+      const a = (2 * Math.PI * k) / CIRCLE_SIDES;
+      return [(w / 2) * (1 + Math.cos(a)), (h / 2) * (1 + Math.sin(a))];
+    });
+  }
   if (shape === "hex") {
     return w >= h
       ? [[0, h / 2], [w / 4, 0], [(3 * w) / 4, 0], [w, h / 2], [(3 * w) / 4, h], [w / 4, h]]
@@ -16,9 +23,9 @@ export function outline(shape, w, h) {
   return [[0, 0], [w, 0], [w, h], [0, h]];
 }
 
-/** Points along a convex CCW polygon with its corners rounded to radius r. */
+/** Points along a convex CCW polygon with its corners rounded to radius r (a circle has none). */
 export function roundedOutline(pts, r, segments = 8) {
-  if (r <= 0) return pts.map((p) => [...p]);
+  if (r <= 0 || pts.length === CIRCLE_SIDES) return pts.map((p) => [...p]);
   const n = pts.length, out = [];
   for (let i = 0; i < n; i++) {
     const [vx, vy] = pts[i], [px, py] = pts[(i + n - 1) % n], [nx, ny] = pts[(i + 1) % n];
@@ -47,6 +54,14 @@ export function insidePolygon(pts, x, y) {
     if ((bx - ax) * (y - ay) - (by - ay) * (x - ax) < -1e-9) return false;
   }
   return true;
+}
+
+/** Smallest circle centred on (cx, cy) holding every point with `margin` to spare: its box. */
+export function fitCircle(points, cx, cy, margin) {
+  let r = 0;
+  for (const [x, y] of points) r = Math.max(r, Math.hypot(x - cx, y - cy));
+  r += margin;
+  return { x0: cx - r, x1: cx + r, y0: cy - r, y1: cy + r };
 }
 
 /**

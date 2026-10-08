@@ -7,7 +7,7 @@ import { FootprintMap } from "./mapview.js";
 import { layFlat } from "./core/inlay.js";
 import { makeZip } from "./core/zip.js";
 import { make3mf } from "./core/threemf.js";
-import { outline, roundedOutline, insidePolygon, fitHexagon } from "./core/footprint.js";
+import { outline, roundedOutline, insidePolygon, fitHexagon, fitCircle } from "./core/footprint.js";
 import { MARKER_SHAPES, markerPolygon } from "./core/markers.js";
 import { layoutText, contoursToSvgPath } from "./core/text.js";
 import { routeTimes } from "./core/profile.js";
@@ -69,6 +69,7 @@ const UI_DEFAULTS = {
 
 let settings = { ...UI_DEFAULTS };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(STORE)) ?? {}); } catch {}
+if (settings.shape === "3:2") settings.shape = "fit";   // retired option
 for (const k of ["labelSize", "labelTitleSize"]) settings[k] = Math.max(MIN_LETTER, settings[k]);   // older saves allowed 2 mm
 const save = () => { try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch {} };
 
@@ -178,6 +179,7 @@ function syncFlat() {
   $("contour-style-field").hidden = terraced;
   fieldOf("r-flatLine").hidden = terraced;
   fieldOf("r-flatWidth").hidden = terraced;
+  fieldOf("r-cornerRadius").hidden = settings.shape === "circle";
   fieldOf("r-flatStep").hidden = !terraced;
   const unit = settings.labelUnits === "imperial" ? "ft" : "m", list = INTERVALS[settings.labelUnits] ?? INTERVALS.metric;
   if (settings.contourInterval !== "auto" && !list.includes(+settings.contourInterval)) settings.contourInterval = "auto";
@@ -187,7 +189,7 @@ function syncFlat() {
   syncTrailLabel();
 }
 $("contour-interval").addEventListener("change", (e) => { settings.contourInterval = e.target.value; changed(); });
-for (const id of ["print-style", "label-units"]) $(id).addEventListener("click", () => syncFlat());
+for (const id of ["print-style", "label-units", "shape"]) $(id).addEventListener("click", () => syncFlat());
 
 // test-fit coupon: a short slot and its inlay with the current width and clearance
 $("coupon").addEventListener("click", () => {
@@ -218,7 +220,7 @@ let bounds = null;     // their bounding box
 // derived once per trim: length, times, points per segment (metres), and a thinned point list
 // (<= 800, ~print-resolution) for the per-frame "is the route inside / under the label" checks
 let trimmed = { length: 0, times: null, metres: [], check: [] };
-let hexCache = {};
+let hexCache = {}, circleCache = {};
 let override = null;   // print area set on the map, { x0, x1, y0, y1 } metres; null = automatic
 let model = null;      // last built model
 let profile = null;    // elevation along the (trimmed) route from the terrain tiles: { max, min, gain, loss }
@@ -394,8 +396,8 @@ function placeLabel(p, a, poly, skipMap) {
 }
 
 // ------------------------------------------------------------------ print area
-const RATIOS = { square: 1, "3:2": 1.5 };
-const footprintShape = () => (settings.shape === "hex" ? "hex" : "rect");
+const RATIOS = { square: 1 };
+const footprintShape = () => (settings.shape === "hex" || settings.shape === "circle" ? settings.shape : "rect");
 
 // ------------------------------------------------------------------ trimming
 const TRIM_GAP = 100;   // metres; shortest route that can be printed
@@ -447,9 +449,19 @@ function autoHexagon() {
   return hexCache.v;
 }
 
+function autoCircle() {
+  if (circleCache.pts !== routePts || circleCache.margin !== settings.marginKm) {
+    const b = bounds;
+    circleCache = { pts: routePts, margin: settings.marginKm,
+                    v: fitCircle(routePts, (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, settings.marginKm * 1000) };
+  }
+  return circleCache.v;
+}
+
 /** Locked width/height ratio for the current shape, oriented like the route; null = free. */
 function aspect() {
   if (settings.shape === "hex") return autoHexagon().flat ? 2 / Math.sqrt(3) : Math.sqrt(3) / 2;
+  if (settings.shape === "circle") return 1;
   const r = RATIOS[settings.shape], b = bounds;
   return r ? (b.xmax - b.xmin >= b.ymax - b.ymin ? r : 1 / r) : null;
 }
@@ -460,6 +472,7 @@ function currentArea() {
     const { x0, x1, y0, y1 } = autoHexagon();
     return { x0, x1, y0, y1 };
   }
+  if (settings.shape === "circle") return { ...autoCircle() };
   const b = bounds, m = settings.marginKm * 1000;
   let x0 = b.xmin - m, x1 = b.xmax + m, y0 = b.ymin - m, y1 = b.ymax + m;
   const a = aspect();
@@ -833,7 +846,7 @@ function saveBlob(blob, name) {
 }
 // e.g. "relief_hex", "contours-engraved_square": taken when the build starts, so the name
 // matches the model on screen even if settings have changed since
-const SHAPE_NAMES = { fit: "rect", square: "square", "3:2": "3x2", hex: "hex", custom: "custom" };
+const SHAPE_NAMES = { fit: "rect", square: "square", hex: "hex", circle: "circle", custom: "custom" };
 const fileVariant = () => [isFlat() && settings.printStyle === "contours" && settings.contourStyle === "engraved" ? "contours-engraved" : settings.printStyle,
                            SHAPE_NAMES[settings.shape] ?? settings.shape].join("_");
 const fileBase = () => [route.name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "route", model?.variant].filter(Boolean).join("_");

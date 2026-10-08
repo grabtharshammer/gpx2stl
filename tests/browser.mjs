@@ -151,6 +151,17 @@ async function run(name, { width, height, dark }) {
   console.log(`${name}: hexagon resized: ${hx2}`);
   await page.screenshot({ path: join(shots, `${name}-model-hex.png`) });
 
+  // circle: square box round the whole route, corner radius hidden
+  await click('#tabs [data-tab="map"]');
+  await click('#shape [data-v="circle"]');
+  const ci = await info(), [, cw, ch] = /→ (\d+) × (\d+) mm/.exec(ci) ?? [];
+  if (cw !== ch || /outside/.test(ci)) fail(`${name}: circle gave "${ci}"`);
+  if (!(await page.$eval("#r-cornerRadius", (r) => r.closest(".field").hidden))) fail(`${name}: corner radius shown for a circle`);
+  await page.screenshot({ path: join(shots, `${name}-map-circle.png`) });
+  await build("circle");
+  await page.screenshot({ path: join(shots, `${name}-model-circle.png`) });
+  await click('#tabs [data-tab="map"]');
+
   // trimming: slider, then drag the finish dot along the route on the map
   await click('#shape [data-v="fit"]');
   await sleep(1000);   // the map animates its zoom to the new box

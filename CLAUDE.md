@@ -25,14 +25,15 @@ from and whose output fixed the reference numbers below.
   in it and passes `opts.area = {south, west, north, east}` to the engine. Because x depends only on
   lon and y only on lat, that box maps exactly to a rectangle.
 - Shape "fit" with no map edit passes NO area, so the engine uses route + margin exactly as the
-  reference model was made (this is what keeps the regression identical). Square / 3:2 expand the fit box to that
-  ratio (landscape/portrait follows the route). Dragging in Fit switches to Custom; Square / 3:2 keep
-  their ratio while resizing. Margin changes and shape clicks discard map edits.
+  reference model was made (this is what keeps the regression identical). Square expands the fit box to 1:1.
+  Dragging in Fit switches to Custom; Square, Hexagon and Circle keep their ratio while resizing. Margin changes and shape clicks discard map edits.
 - Hexagon: `opts.shape = "hex"` cuts a hexagon inscribed in the area box (flat top if wider than
   tall, else pointy), with corners rounded by inset/round-offset in manifold. `core/footprint.js`
   holds the outline, a JS rounded outline for the map, and `fitHexagon` (smallest regular hexagon
   around the route points + margin, in the tighter orientation). Map resize handles sit on the
   shape's corners (`handleFractions` in mapview.js).
+- Circle: `opts.shape = "circle"`, a CIRCLE_SIDES-gon inscribed in the (square) area, no corner
+  rounding (the Corner radius slider hides). `fitCircle` centres it on the route's bounding box.
 - Route points outside the area are skipped when rasterising (not clamped, which would draw a fake
   ridge along the edge).
 - Map: Leaflet 1.9.4 ESM + OpenTopoMap tiles (needs attribution; fine for hobby traffic).

@@ -13,6 +13,10 @@ function handleFractions(shape, w, h) {
   if (shape === "hex")
     return w >= h ? { sw: [0.25, 0], se: [0.75, 0], ne: [0.75, 1], nw: [0.25, 1] }      // flat top
                   : { sw: [0, 0.25], se: [1, 0.25], ne: [1, 0.75], nw: [0, 0.75] };     // pointy top
+  if (shape === "circle") {
+    const c = 0.5 - Math.SQRT1_2 / 2;                                                   // at 45°
+    return { sw: [c, c], se: [1 - c, c], ne: [1 - c, 1 - c], nw: [c, 1 - c] };
+  }
   return { sw: [0, 0], se: [1, 0], ne: [1, 1], nw: [0, 1] };
 }
 
@@ -199,7 +203,7 @@ export class FootprintMap {
 
   /**
    * area: local metres; cornerM: corner radius in metres; aspect: locked w/h ratio or null;
-   * shape: "rect" or "hex" (see core/footprint.js outline).
+   * shape: "rect", "hex" or "circle" (see core/footprint.js outline).
    */
   setFootprint(area, cornerM, aspect, shape = "rect", fit = false) {
     this.area = { ...area };
