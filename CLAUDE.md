@@ -38,6 +38,16 @@ from and whose output fixed the reference numbers below.
   ridge along the edge).
 - Map: Leaflet 1.9.4 ESM + OpenTopoMap tiles (needs attribution; fine for hobby traffic).
 
+## Settings in the URL (web/js/urlstate.js)
+Copied unchanged from img2stl (keep the two in step; `tests/urlstate.mjs` too). `URL_SCHEMA` in
+app.js: every slider (number, clamped to hardMin..4x max like typed values) plus the seg buttons'
+`data-v` values (read from the DOM so they can't drift), markers from MARKER_SHAPES, intervals from
+INTERVALS. `save()` writes only non-default settings via batched `history.replaceState`; a URL
+with any valid setting wins over localStorage, and keys it leaves out are defaults. `labelUnits`
+is always written (its default follows the browser language, so a US link must still say feet).
+Per-route state stays out: map area edits ("custom" is written as fit), trim, label text and
+position. Copy link button in the top bar.
+
 ## Trimming (core/gpx.js trimSegments / routeIndex)
 `trim = {from, to}` metres along the route (great-circle, gaps between segments not counted).
 `trimSegments` cuts exactly at those distances (interpolated points); the full range returns the

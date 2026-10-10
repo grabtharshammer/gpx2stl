@@ -275,8 +275,55 @@ async function run(name, { width, height, dark }) {
   return { zip, tmf, coupon };
 }
 
+// settings in the URL: a link wins over saved settings, junk is dropped, the address bar follows
+// changes, and Copy link copies it
+async function links() {
+  const ctx = await browser.createBrowserContext();
+  const page = await ctx.newPage();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  page.on("pageerror", (e) => fail(`links page error: ${e.message}`));
+  page.on("dialog", (d) => { fail(`links: unexpected dialog "${d.message()}"`); d.dismiss(); });
+  await ctx.overridePermissions(new URL(url).origin, ["clipboard-read", "clipboard-write", "clipboard-sanitized-write"]);
+  await page.goto(url, { waitUntil: "networkidle0" });
+  await page.evaluate(() => localStorage.setItem("gpx2stl-settings-v1", JSON.stringify({ size: 120, zExag: 3 })));
+  const search = async () => { await sleep(350); return page.evaluate(() => location.search); };
+  const expectSearch = async (want, what) => {
+    const got = await search();
+    if (got !== want) fail(`links: ${what}: address bar ${got || "(no query)"} (expected ${want || "nothing"})`);
+    else console.log(`links: ${what}: ${got || "(no query)"}`);
+  };
+  const controls = () => page.evaluate(() => [document.getElementById("r-size").value, document.getElementById("r-zExag").value,
+    ...["shape", "label-units", "print-style"].map((id) => document.querySelector(`#${id} [aria-checked="true"]`)?.dataset.v),
+    document.getElementById("label-on").checked, document.getElementById("contour-interval").value].join());
+
+  await page.goto(`${url}?size=150&shape=hex&labelOn=1&labelUnits=imperial&printStyle=contours&contourInterval=100&bogus=1&zExag=lots&trailStyle=sideways`,
+                  { waitUntil: "networkidle0" });
+  let c = await controls();
+  const want = "150,2,hex,imperial,contours,true,100";
+  if (c !== want) fail(`links: opened link gave controls ${c} (expected ${want}: saved zExag 3 must not leak in)`);
+  await expectSearch("?size=150&shape=hex&printStyle=contours&contourInterval=100&labelUnits=imperial&labelOn=1", "opened a link, junk dropped");
+
+  await page.$eval("#r-zExag", (r) => { r.value = 2.5; r.dispatchEvent(new Event("input")); });
+  await page.click('#label-units [data-v="metric"]');
+  await expectSearch("?size=150&zExag=2.5&shape=hex&printStyle=contours&contourInterval=100&labelUnits=metric&labelOn=1", "after a slider and the units");
+
+  await page.click("#copy-link");
+  await sleep(300);
+  const [clip, href, label] = await page.evaluate(async () => [await navigator.clipboard.readText(), location.href,
+    document.querySelector("#copy-link span").textContent]);
+  if (clip !== href || !clip.includes("zExag=2.5")) fail(`links: clipboard "${clip}" vs address bar "${href}"`);
+  else if (label !== "Link copied") fail(`links: button says "${label}" after copying`);
+  else console.log(`links: copied ${clip}`);
+
+  await page.reload({ waitUntil: "networkidle0" });
+  c = await controls();
+  if (c !== "150,2.5,hex,metric,contours,true,100") fail(`links: after reload controls ${c}`);
+  await ctx.close();
+}
+
 let files;
 try {
+  await links();
   files = await run("desktop", { width: 1360, height: 860 });
   await run("phone-dark", { width: 390, height: 844, dark: true });
 } finally {

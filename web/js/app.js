@@ -9,6 +9,7 @@ import { makeZip } from "./core/zip.js";
 import { make3mf } from "./core/threemf.js";
 import { outline, roundedOutline, insidePolygon, fitHexagon, fitCircle } from "./core/footprint.js";
 import { MARKER_SHAPES, markerPolygon } from "./core/markers.js";
+import { readUrl, writeUrl, shareUrl, copyText } from "./urlstate.js";
 import { layoutText, contoursToSvgPath } from "./core/text.js";
 import { routeTimes } from "./core/profile.js";
 
@@ -67,11 +68,37 @@ const UI_DEFAULTS = {
   labelUnits: /^en-(US|LR|MM)$/i.test(navigator.language) ? "imperial" : "metric",
 };
 
+const INTERVALS = { metric: [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000], imperial: [10, 20, 25, 40, 50, 100, 200, 250, 500, 1000, 2000] };
+
+// Settings in the URL (see urlstate.js). What may come in through a link; choices are read from
+// the buttons, so they can't drift apart. Per-route state (map area edits, trim, label text and
+// position) stays out: it only makes sense for one GPX file, which is never in the URL.
+const choices = (id, parse = (v) => v) => [...$(id).querySelectorAll("button")].map((b) => parse(b.dataset.v));
+const URL_SCHEMA = {
+  ...Object.fromEntries(Object.values(SLIDERS).flat().map((d) => [d.key, { type: "number", min: d.hardMin ?? Math.min(0, d.min), max: d.max * 4 }])),
+  shape: { type: "enum", values: choices("shape").filter((v) => v !== "custom") }, cell: { type: "enum", values: choices("detail", parseFloat) },
+  printStyle: { type: "enum", values: choices("print-style") }, contourStyle: { type: "enum", values: choices("contour-style") },
+  contourInterval: { type: "enum", values: ["auto", ...new Set(Object.values(INTERVALS).flat().map(String))] },
+  labelUnits: { type: "enum", values: choices("label-units") }, trailStyle: { type: "enum", values: choices("trail-style") },
+  startMarker: { type: "enum", values: MARKER_SHAPES }, endMarker: { type: "enum", values: MARKER_SHAPES },
+  labelOn: { type: "bool" }, labelStyle: { type: "enum", values: choices("label-style") }, labelAlign: { type: "enum", values: choices("label-align") },
+};
+// units default from the browser's language, so they're always written: a link from the US must
+// still give feet when opened elsewhere
+const URL_DEFAULTS = { ...UI_DEFAULTS, labelUnits: null };
+
+// a link's settings win over the ones saved in this browser; keys the link leaves out are defaults
 let settings = { ...UI_DEFAULTS };
-try { Object.assign(settings, JSON.parse(localStorage.getItem(STORE)) ?? {}); } catch {}
-if (settings.shape === "3:2") settings.shape = "fit";   // retired option
+const fromUrl = readUrl(URL_SCHEMA);
+if (fromUrl) Object.assign(settings, fromUrl);
+else try { Object.assign(settings, JSON.parse(localStorage.getItem(STORE)) ?? {}); } catch {}
+if (settings.shape === "3:2" || settings.shape === "custom") settings.shape = "fit";   // retired option; a custom area isn't kept
 for (const k of ["labelSize", "labelTitleSize"]) settings[k] = Math.max(MIN_LETTER, settings[k]);   // older saves allowed 2 mm
-const save = () => { try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch {} };
+const save = () => {
+  try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch {}
+  // "custom" means an area drawn on the map, which isn't in the link
+  writeUrl(URL_SCHEMA, { ...settings, shape: settings.shape === "custom" ? "fit" : settings.shape }, URL_DEFAULTS);
+};
 
 const isFlat = () => settings.printStyle !== "relief";
 const engineOpts = () => ({
@@ -160,6 +187,14 @@ function syncControls() {
   for (const [k, set] of Object.entries(inputs)) set(settings[k]);
   segSyncs.forEach((s) => s());
 }
+$("copy-link").addEventListener("click", async () => {
+  const btn = $("copy-link"), label = btn.querySelector("span"), url = shareUrl();
+  if (!(await copyText(url))) { prompt("Copy this link:", url); return; }
+  label.textContent = "Link copied";
+  btn.classList.add("done");
+  clearTimeout(btn.timer);
+  btn.timer = setTimeout(() => { label.textContent = "Copy link"; btn.classList.remove("done"); }, 1800);
+});
 
 const depthLabel = document.querySelector('label[for="r-trailDepth"]');
 $("trail-style").addEventListener("click", () => syncTrailLabel());
@@ -169,7 +204,6 @@ const syncTrailLabel = () => {
 };
 
 // flat print styles: show their settings, hide the relief-only ones
-const INTERVALS = { metric: [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000], imperial: [10, 20, 25, 40, 50, 100, 200, 250, 500, 1000, 2000] };
 const fieldOf = (id) => $(id).closest(".field");
 function syncFlat() {
   const flat = isFlat(), terraced = settings.printStyle === "terraced";

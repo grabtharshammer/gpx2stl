@@ -49,11 +49,15 @@ svg { display: block; }
 .mtn { fill: var(--moss); }
 .trk { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; }
 
-.topbar { padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand svg { width: 28px; height: 28px; }
 .brand .name { font-weight: 700; font-size: 19px; letter-spacing: -0.01em; }
 .brand .tag { color: var(--muted); font-size: 14px; }
+.top-btn { display: inline-flex; align-items: center; gap: 6px; flex: none; border: 1px solid var(--line); background: var(--field); color: var(--ink); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+.top-btn:hover, .top-btn.done { border-color: var(--accent); }
+.top-btn.done { color: var(--accent); }
+.top-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
 .layout { flex: 1; display: grid; grid-template-columns: 360px 1fr; gap: 20px; padding: 20px 24px; min-height: 0; }
 .panel { display: flex; flex-direction: column; gap: 14px; }

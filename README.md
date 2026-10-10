@@ -46,6 +46,11 @@ desktop and phone browsers. Everything runs in your browser; your GPX file is ne
 
 Your settings are remembered in this browser; the route, trim and label text are not.
 
+The address bar always holds your current settings (only the ones you've changed, e.g.
+`?size=150&shape=hex&printStyle=contours`), so you can bookmark it or share it; **Copy link** in
+the top bar copies it. Opening such a link uses its settings instead of the saved ones. The GPX
+file, trim, label text and any area you drew on the map aren't in the link.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -156,6 +161,7 @@ Node 20+ and a Chromium install:
     cd tests
     npm install
     node regression.mjs [tile_cache_dir]       # engine checks
+    node urlstate.mjs                          # settings <-> URL rules
     node browser.mjs /path/to/chromium [dir]   # full UI flow, screenshots to [dir]
     BASE_URL=https://grabtharshammer.github.io/gpx2stl/ node browser.mjs /path/to/chromium   # test the live site
 
